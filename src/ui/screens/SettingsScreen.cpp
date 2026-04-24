@@ -932,20 +932,23 @@ void SettingsScreen::applyRadioPreset(int preset) {
     applyAndSave();
     buildRadioMenu();
     if (_rns) {
-        // Encode display name as msgpack app_data for announce
+        // Encode display name + capability advertisement as msgpack app_data.
+        // Format: [display_name(bin), stamp_cost(uint), supported_functionality(array)].
+        // Empty supported_functionality list signals no SF_COMPRESSION (bz2) support
+        // so Python LXMF disables auto_compress for us. Always emit fixarray(3) —
+        // a shorter form makes Python default to "compression supported".
         const String& name = _config ? _config->settings().displayName : String();
-        if (!name.isEmpty()) {
-            size_t len = name.length();
-            if (len > 31) len = 31;
-            uint8_t buf[3 + 31];
-            buf[0] = 0x91;
-            buf[1] = 0xC4;
-            buf[2] = (uint8_t)len;
-            memcpy(buf + 3, name.c_str(), len);
-            _rns->announce(RNS::Bytes(buf, 3 + len));
-        } else {
-            _rns->announce();
-        }
+        size_t nameLen = name.length();
+        if (nameLen > 31) nameLen = 31;
+        uint8_t buf[5 + 31];
+        size_t i = 0;
+        buf[i++] = 0x93;                   // fixarray(3)
+        buf[i++] = 0xC4;                   // bin 8
+        buf[i++] = (uint8_t)nameLen;
+        if (nameLen) { memcpy(buf + i, name.c_str(), nameLen); i += nameLen; }
+        buf[i++] = 0x00;                   // stamp_cost = 0
+        buf[i++] = 0x90;                   // empty fixarray (no SF_* supported)
+        _rns->announce(RNS::Bytes(buf, i));
     }
     showToast("Preset applied + announced");
     Serial.printf("[SETTINGS] Radio preset %d applied\n", preset);
