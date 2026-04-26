@@ -207,7 +207,7 @@ void MessageStore::migrateOldFilenames() {
                 File peerDir = dir.openNextFile();
                 while (peerDir) {
                     if (peerDir.isDirectory()) {
-                        peerDirs.push_back(String(SD_PATH_MESSAGES) + peerDir.name());
+                        peerDirs.push_back(String(SD_PATH_MESSAGES) + "/" + peerDir.name());
                     }
                     peerDir.close();
                     peerDir = dir.openNextFile();
@@ -272,7 +272,7 @@ void MessageStore::migrateOldFilenames() {
                 File peerDir = dir.openNextFile();
                 while (peerDir) {
                     if (peerDir.isDirectory()) {
-                        peerDirs.push_back(String(PATH_MESSAGES) + peerDir.name());
+                        peerDirs.push_back(String(PATH_MESSAGES) + "/" + peerDir.name());
                     }
                     peerDir.close();
                     peerDir = dir.openNextFile();
@@ -729,11 +729,11 @@ int MessageStore::unreadCountForPeer(const std::string& peerHex) const {
 }
 
 String MessageStore::conversationDir(const std::string& peerHex) const {
-    return String(PATH_MESSAGES) + peerHex.substr(0, 16).c_str();
+    return String(PATH_MESSAGES) + "/" + peerHex.substr(0, 16).c_str();
 }
 
 String MessageStore::sdConversationDir(const std::string& peerHex) const {
-    return String(SD_PATH_MESSAGES) + peerHex.substr(0, 16).c_str();
+    return String(SD_PATH_MESSAGES) + "/" + peerHex.substr(0, 16).c_str();
 }
 
 // Trim flash to cache size when SD is the primary store

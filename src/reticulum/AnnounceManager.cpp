@@ -426,7 +426,7 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
     // Write to SD (primary)
     if (_sd && _sd->isReady()) {
         _sd->ensureDir(SD_PATH_CONTACTS);
-        String sdPath = String(SD_PATH_CONTACTS) + filename;
+        String sdPath = String(SD_PATH_CONTACTS) + "/" + filename;
         sdOk = _sd->writeString(sdPath.c_str(), json);
         if (!sdOk) {
             // Atomic rename failed — try direct write
@@ -442,7 +442,7 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
     // Write to flash (fallback)
     if (_flash && _flash->isReady()) {
         _flash->ensureDir(PATH_CONTACTS);
-        String flashPath = String(PATH_CONTACTS) + filename;
+        String flashPath = String(PATH_CONTACTS) + "/" + filename;
         flashOk = _flash->writeString(flashPath.c_str(), json);
         if (!flashOk) {
             flashOk = _flash->writeDirect(flashPath.c_str(),
@@ -463,14 +463,14 @@ void AnnounceManager::removeContact(const std::string& hexHash) {
     filename += ".json";
 
     if (_sd && _sd->isReady()) {
-        String sdPath = String(SD_PATH_CONTACTS) + filename;
+        String sdPath = String(SD_PATH_CONTACTS) + "/" + filename;
         _sd->remove(sdPath.c_str());
         // Also clean up atomic write artifacts
         _sd->remove((sdPath + ".tmp").c_str());
         _sd->remove((sdPath + ".bak").c_str());
     }
     if (_flash && _flash->isReady()) {
-        String flashPath = String(PATH_CONTACTS) + filename;
+        String flashPath = String(PATH_CONTACTS) + "/" + filename;
         _flash->remove(flashPath.c_str());
         _flash->remove((flashPath + ".tmp").c_str());
         _flash->remove((flashPath + ".bak").c_str());
