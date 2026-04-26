@@ -66,7 +66,7 @@ void StatusBar::render(M5Canvas& canvas) {
     canvas.setCursor((Theme::SCREEN_W - modeLen) / 2, Theme::STATUS_PAD);
     canvas.print(centerText);
 
-    // Connection indicators (right) — LoRa + TCP
+    // Connection indicators (right) — LoRa + TCP + AutoIface peers
     int rx = Theme::SCREEN_W - Theme::STATUS_PAD;
 
     // TCP indicator
@@ -77,6 +77,18 @@ void StatusBar::render(M5Canvas& canvas) {
         canvas.setTextColor(Theme::ACCENT);
         canvas.setCursor(rx, Theme::STATUS_PAD);
         canvas.print(tcpStr);
+        rx -= 4;
+    }
+
+    // AutoInterface peers indicator (only shown when at least one peer)
+    if (_autoIfacePeers > 0) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "L:%d", _autoIfacePeers);
+        int w = strlen(buf) * Theme::CHAR_W;
+        rx -= w;
+        canvas.setTextColor(Theme::PRIMARY);
+        canvas.setCursor(rx, Theme::STATUS_PAD);
+        canvas.print(buf);
         rx -= 4;
     }
 

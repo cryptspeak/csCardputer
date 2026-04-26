@@ -24,7 +24,9 @@
 #include "reticulum/LXMFManager.h"
 #include "transport/WiFiInterface.h"
 #include "transport/TCPClientInterface.h"
+#include "transport/AutoInterfaceWrapper.h"
 #include "config/UserConfig.h"
+#include <esp_netif.h>
 #include "ui/screens/NodesScreen.h"
 #include "ui/screens/MessagesScreen.h"
 #include "ui/screens/MessageView.h"
@@ -66,6 +68,9 @@ WiFiInterface* wifiImpl = nullptr;
 RNS::Interface wifiIface({RNS::Type::NONE});
 std::vector<TCPClientInterface*> tcpClients;
 std::list<RNS::Interface> tcpIfaces;  // Must persist — Transport stores references (list: no realloc)
+AutoInterfaceWrapper autoIface;
+bool autoIfaceDeferredStart = false;
+unsigned long autoIfaceDeferredAt = 0;
 UserConfig userConfig;
 PowerManager power;
 AudioNotify audio;
@@ -540,6 +545,12 @@ void setup() {
         if (!userConfig.settings().wifiSTASSID.isEmpty()) {
             WiFi.mode(WIFI_STA);
             WiFi.setAutoReconnect(true);
+            // AutoInterface needs an IPv6 link-local address.  Must be
+            // enabled BEFORE WiFi.begin() so SLAAC starts on STA association.
+            if (userConfig.settings().autoIfaceEnabled) {
+                WiFi.enableIpV6();
+                Serial.println("[WIFI] IPv6 enabled (AutoInterface ON)");
+            }
             WiFi.begin(userConfig.settings().wifiSTASSID.c_str(),
                        userConfig.settings().wifiSTAPassword.c_str());
             wifiSTAStarted = true;
@@ -865,6 +876,15 @@ void loop() {
 
             // Recreate TCP clients on every WiFi connect (old clients may have stale sockets)
             reloadTCPClients();
+            // Arm AutoInterface deferred-start; SLAAC needs ~1.5–10s to assign
+            // a link-local IPv6 address.  Calling enableIpV6() pre-begin is
+            // not enough on every Arduino-ESP32 version — call again now that
+            // STA is associated.
+            if (userConfig.settings().autoIfaceEnabled) {
+                WiFi.enableIpV6();
+                autoIfaceDeferredStart = true;
+                autoIfaceDeferredAt = millis();
+            }
         } else if (!connected && wifiSTAConnected) {
             wifiSTAConnected = false;
             // Stop, free, and deregister TCP clients cleanly
@@ -875,6 +895,33 @@ void loop() {
             tcpClients.clear();
             tcpIfaces.clear();
             Serial.println("[WIFI] STA disconnected, TCP interfaces deregistered");
+            autoIface.stop();
+            autoIfaceDeferredStart = false;
+        }
+    }
+
+    // 5.5. AutoInterface deferred start — fire once SLAAC assigns a link-local
+    // IPv6 address.  Arduino's IPv6Address::toString returns expanded
+    // "0000:0000:..." form before SLAAC completes; check fe80::/10 prefix
+    // bytes directly.  Give up after 10 s on hostile APs.
+    if (autoIfaceDeferredStart) {
+        unsigned long elapsed = millis() - autoIfaceDeferredAt;
+        if (elapsed >= 1500) {
+            IPv6Address ll = WiFi.localIPv6();
+            bool isLinkLocal = (ll[0] == 0xfe) && ((ll[1] & 0xc0) == 0x80);
+            if (isLinkLocal) {
+                autoIfaceDeferredStart = false;
+                esp_netif_t* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+                uint32_t scope = sta ? esp_netif_get_netif_impl_index(sta) : 1;
+                autoIface.start(
+                    userConfig.settings().autoIfaceGroupId.c_str(),
+                    userConfig.settings().autoIfaceMaxPeers,
+                    ll.toString(),
+                    scope);
+            } else if (elapsed >= 10000) {
+                autoIfaceDeferredStart = false;
+                Serial.println("[AUTOIFACE] SLAAC timeout — no link-local after 10s");
+            }
         }
     }
 
@@ -889,6 +936,9 @@ void loop() {
                 tcp->loop();
             }
         }
+        // AutoInterface always runs — non-blocking, time-gated.  Skipping
+        // it under TCP load drops peers to a 22 s silence timeout.
+        autoIface.loop();
     }
 
     // 7. Announce manager deferred saves (contacts + name cache)
@@ -937,6 +987,7 @@ void loop() {
                     if (tcp->isConnected()) { anyTcpConnected = true; break; }
                 }
                 ui.statusBar().setTCPConnected(anyTcpConnected);
+                ui.statusBar().setAutoIfacePeers(autoIface.isOnline() ? (int)autoIface.peerCount() : -1);
 #if HAS_GPS
                 ui.statusBar().setGPSTimeFix(gps.hasTimeFix());
 #endif
@@ -953,7 +1004,7 @@ void loop() {
 
         if (now - lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
             lastHeartbeat = now;
-            Serial.printf("[HEART] heap=%lu min=%lu stack=%lu loop=%lums nodes=%d paths=%d links=%d lxmfQ=%d writeQ=%d up=%lus\n",
+            Serial.printf("[HEART] heap=%lu min=%lu stack=%lu loop=%lums nodes=%d paths=%d links=%d lxmfQ=%d writeQ=%d autoiface=%s peers=%u up=%lus\n",
                           (unsigned long)ESP.getFreeHeap(),
                           (unsigned long)ESP.getMinFreeHeap(),
                           (unsigned long)uxTaskGetStackHighWaterMark(NULL),
@@ -963,6 +1014,8 @@ void loop() {
                           (int)rns.linkCount(),
                           lxmf.queuedCount(),
                           messageStore.writeQueue().drainCount(),
+                          autoIface.isOnline() ? "ON" : "off",
+                          (unsigned)autoIface.peerCount(),
                           millis() / 1000);
             maxLoopTime = 0;
         }

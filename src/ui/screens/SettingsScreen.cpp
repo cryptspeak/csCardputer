@@ -122,6 +122,11 @@ void SettingsScreen::buildWiFiMenu() {
         }
         _list.addItem("[Scan Networks]");           // Item 3
         _list.addItem("> TCP Connections");          // Item 4
+        // Item 5: AutoInterface (LAN auto-discovery via IPv6 multicast)
+        char autoBuf[40];
+        snprintf(autoBuf, sizeof(autoBuf), "Auto-discover LAN: %s",
+                 s.autoIfaceEnabled ? "ON" : "OFF");
+        _list.addItem(autoBuf);
     }
     // OFF mode: only mode selector + back
 
@@ -815,6 +820,17 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                 // > TCP Connections
                 _subMenu = MENU_TCP;
                 buildTCPMenu();
+                return true;
+            }
+            if (sel == 5) {
+                // Toggle Auto-discover LAN (AutoInterface).  IPv6 enable
+                // is one-shot per WiFi init, so changes take effect on
+                // next reboot.
+                auto& s = _config->settings();
+                s.autoIfaceEnabled = !s.autoIfaceEnabled;
+                applyAndSave();
+                showToast("Reboot to apply");
+                buildWiFiMenu();
                 return true;
             }
         }

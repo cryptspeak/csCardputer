@@ -86,6 +86,11 @@ bool UserConfig::parseJson(const String& json) {
     _settings.timezoneSet = doc["tz_set"]       | false;
     _settings.gpsTimeEnabled = doc["gps_time"] | true;
     _settings.gpsLocationEnabled = doc["gps_loc"] | false;
+
+    _settings.autoIfaceEnabled  = doc["autoiface_en"]    | false;
+    _settings.autoIfaceGroupId  = doc["autoiface_group"] | "reticulum";
+    _settings.autoIfaceMaxPeers = doc["autoiface_max"]   | 4;
+
     _settings.displayName = doc["display_name"] | "";
 
     Serial.printf("[CONFIG] Loaded: wifi_mode=%d ssid='%s' name='%s'\n",
@@ -131,6 +136,11 @@ String UserConfig::serializeToJson() const {
     doc["tz_set"]       = _settings.timezoneSet;
     doc["gps_time"]     = _settings.gpsTimeEnabled;
     doc["gps_loc"]      = _settings.gpsLocationEnabled;
+
+    doc["autoiface_en"]    = _settings.autoIfaceEnabled;
+    doc["autoiface_group"] = _settings.autoIfaceGroupId;
+    doc["autoiface_max"]   = _settings.autoIfaceMaxPeers;
+
     doc["display_name"] = _settings.displayName;
 
     String json;

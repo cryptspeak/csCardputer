@@ -53,6 +53,11 @@ struct UserSettings {
     bool gpsTimeEnabled = true;      // Sync system clock from GPS
     bool gpsLocationEnabled = false; // Track position (user must opt in)
 
+    // AutoInterface (IPv6 multicast LAN auto-discovery; opt-in)
+    bool   autoIfaceEnabled  = false;
+    String autoIfaceGroupId  = "reticulum";
+    uint8_t autoIfaceMaxPeers = 4;
+
     // Identity
     String displayName;
 };
