@@ -73,4 +73,8 @@ Note: WiFi bridging methods and interfaces will be revamped with Ratspeak's clie
 
 ## License
 
-GPL-3.0
+GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
+
+Vendored third-party code keeps its own license notices, including
+`lib/Crypto` under MIT. Radio-driver excerpts attributed in source remain under
+their original MIT notice.
