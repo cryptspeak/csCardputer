@@ -17,7 +17,7 @@ public:
     bool begin(FlashStore* flash, SDStore* sd = nullptr);
 
     // Save a message (incoming or outgoing) — fully non-blocking (<1ms)
-    bool saveMessage(const LXMFMessage& msg);
+    bool saveMessage(LXMFMessage& msg);
 
     // Load messages for a conversation with pagination (newest last)
     std::vector<LXMFMessage> loadConversation(const std::string& peerHex, int limit = 20, int offset = 0) const;
@@ -36,6 +36,12 @@ public:
 
     // Mark all incoming messages in a conversation as read (non-blocking)
     void markConversationRead(const std::string& peerHex);
+
+    // Restore/update outgoing state across reboots and delivery proofs
+    std::vector<LXMFMessage> loadPendingOutgoing() const;
+    std::vector<std::string> loadRecentMessageIds(size_t maxIds) const;
+    bool updateMessageStatus(const std::string& peerHex, double timestamp, bool incoming, LXMFStatus newStatus);
+    bool updateMessageStatusByCounter(const std::string& peerHex, uint32_t counter, bool incoming, LXMFStatus newStatus);
 
     // Get unread count for a peer using read-status file
     int unreadCountForPeer(const std::string& peerHex) const;

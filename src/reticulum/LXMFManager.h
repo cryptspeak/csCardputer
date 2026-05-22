@@ -10,6 +10,7 @@
 #include <functional>
 #include <deque>
 #include <set>
+#include <map>
 
 class LXMFManager {
 public:
@@ -51,7 +52,9 @@ public:
 
 private:
     bool sendDirect(LXMFMessage& msg);
+    bool ensureOutboundLink(const RNS::Destination& dest, const RNS::Bytes& destHash, const char* reason);
     void processIncoming(const uint8_t* data, size_t len, const RNS::Bytes& destHash);
+    void rememberMessageId(const std::string& msgIdHex);
 
     // Static callbacks for microReticulum
     static void onPacketReceived(const RNS::Bytes& data, const RNS::Packet& packet);
@@ -70,6 +73,7 @@ private:
     RNS::Bytes _outLinkDestHash;       // Destination the ACTIVE _outLink is for
     RNS::Bytes _outLinkPendingHash;    // Destination being connected to (not yet established)
     bool _outLinkPending = false;
+    unsigned long _outLinkPendingSinceMs = 0;
 
     // Unread tracking (lazy-loaded on first access)
     void computeUnreadFromDisk();
@@ -78,11 +82,26 @@ private:
 
     // Deduplication: recently seen message IDs
     std::set<std::string> _seenMessageIds;
+    std::deque<std::string> _seenMessageOrder;
     static constexpr int MAX_SEEN_IDS = 100;
 
     // Incoming message queue — packet callbacks push here, loop() processes
     std::vector<LXMFMessage> _incomingQueue;
     static constexpr int MAX_INCOMING_QUEUE = 8;
+
+    struct PendingProof {
+        std::string peerHex;
+        double timestamp = 0;
+        uint32_t savedCounter = 0;
+        unsigned long createdMs = 0;
+        uint8_t proofAttempts = 0;
+        LXMFMessage msg;
+    };
+    static std::map<std::string, PendingProof> _pendingProofs;
+    static void onProofDelivered(const RNS::PacketReceipt& receipt);
+    static void onProofTimeout(const RNS::PacketReceipt& receipt);
+    static void handleProofTimeoutHash(const std::string& receiptHash);
+    void registerProofTracking(RNS::PacketReceipt& receipt, const LXMFMessage& msg);
 
     static LXMFManager* _instance;
 };

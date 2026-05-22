@@ -331,7 +331,7 @@ void SettingsScreen::connectWiFi() {
     WiFi.disconnect(false);
     delay(100);
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
+    WiFi.setAutoReconnect(false);
     WiFi.begin(s.wifiSTASSID.c_str(), s.wifiSTAPassword.c_str());
     showToast("Connecting...");
     buildWiFiMenu();

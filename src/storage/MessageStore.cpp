@@ -386,7 +386,7 @@ void MessageStore::ensureConvDirs(const std::string& peerHex) {
     _ensuredDirs.insert(peerHex);
 }
 
-bool MessageStore::saveMessage(const LXMFMessage& msg) {
+bool MessageStore::saveMessage(LXMFMessage& msg) {
     if (!_flash) return false;
 
     // Global capacity check — refuse new messages when full
@@ -411,6 +411,9 @@ bool MessageStore::saveMessage(const LXMFMessage& msg) {
     doc["incoming"] = msg.incoming;
     doc["status"] = (int)msg.status;
     doc["rcv"] = counter;
+    if (msg.messageId.size() > 0) {
+        doc["msgid"] = msg.messageId.toHex();
+    }
 
     String json;
     serializeJson(doc, json);
@@ -428,11 +431,20 @@ bool MessageStore::saveMessage(const LXMFMessage& msg) {
 
     // Enqueue to WriteQueue — non-blocking (safe from packet callbacks)
     // Flash is written first in processJob, SD second
+    bool enqueued = false;
     if (_sd && _sd->isReady()) {
-        _writeQueue.enqueue(sdPath.c_str(), flashPath.c_str(), json, WriteBackend::BOTH);
+        enqueued = _writeQueue.enqueue(sdPath.c_str(), flashPath.c_str(), json, WriteBackend::BOTH);
     } else {
-        _writeQueue.enqueue(nullptr, flashPath.c_str(), json, WriteBackend::FLASH_ONLY);
+        enqueued = _writeQueue.enqueue(nullptr, flashPath.c_str(), json, WriteBackend::FLASH_ONLY);
     }
+    if (!enqueued) {
+        _nextReceiveCounter--;
+        Serial.printf("[MSGSTORE] Write queue rejected message for %s\n", peerHex.substr(0, 8).c_str());
+        return false;
+    }
+
+    msg.savedCounter = counter;
+    msg.receiveCounter = counter;
 
     // Add to conversation list if new
     bool found = false;
@@ -544,6 +556,12 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
         msg.incoming = doc["incoming"] | false;
         msg.status = (LXMFStatus)(doc["status"] | 0);
         msg.receiveCounter = doc["rcv"] | (uint32_t)0;
+        msg.savedCounter = msg.receiveCounter;
+        std::string msgIdHex = doc["msgid"] | "";
+        if (!msgIdHex.empty()) {
+            msg.messageId = RNS::Bytes();
+            msg.messageId.assignHex(msgIdHex.c_str());
+        }
 
         messages.push_back(msg);
     }
@@ -568,6 +586,49 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
     }
 
     return messages;
+}
+
+std::vector<LXMFMessage> MessageStore::loadPendingOutgoing() const {
+    std::vector<LXMFMessage> pending;
+    for (const auto& peerHex : _conversations) {
+        std::vector<LXMFMessage> messages = loadConversation(peerHex, 200);
+        for (auto& msg : messages) {
+            if (msg.incoming) continue;
+            if (msg.status == LXMFStatus::QUEUED || msg.status == LXMFStatus::SENDING) {
+                msg.status = LXMFStatus::QUEUED;
+                pending.push_back(msg);
+            }
+        }
+    }
+    std::sort(pending.begin(), pending.end(), [](const LXMFMessage& a, const LXMFMessage& b) {
+        return a.savedCounter < b.savedCounter;
+    });
+    return pending;
+}
+
+std::vector<std::string> MessageStore::loadRecentMessageIds(size_t maxIds) const {
+    std::vector<std::pair<uint32_t, std::string>> ordered;
+    for (const auto& peerHex : _conversations) {
+        std::vector<LXMFMessage> messages = loadConversation(peerHex, 200);
+        for (const auto& msg : messages) {
+            if (msg.messageId.size() == 0) continue;
+            ordered.push_back({msg.savedCounter, msg.messageId.toHex()});
+        }
+    }
+
+    std::sort(ordered.begin(), ordered.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+    if (ordered.size() > maxIds) {
+        ordered.erase(ordered.begin(), ordered.end() - maxIds);
+    }
+
+    std::set<std::string> seen;
+    std::vector<std::string> ids;
+    ids.reserve(ordered.size());
+    for (const auto& item : ordered) {
+        if (seen.insert(item.second).second) ids.push_back(item.second);
+    }
+    return ids;
 }
 
 int MessageStore::messageCount(const std::string& peerHex) const {
@@ -668,6 +729,114 @@ void MessageStore::markConversationRead(const std::string& peerHex) {
     } else {
         _writeQueue.enqueue(nullptr, flashPath.c_str(), counterStr, WriteBackend::FLASH_ONLY);
     }
+}
+
+bool MessageStore::updateMessageStatusByCounter(const std::string& peerHex, uint32_t counter, bool incoming, LXMFStatus newStatus) {
+    if (counter == 0) return false;
+
+    char filename[64];
+    snprintf(filename, sizeof(filename), "%013lu_%c.json",
+             (unsigned long)counter, incoming ? 'i' : 'o');
+
+    auto readModifyWrite = [&](auto readFn, auto writeFn, const String& dir) -> bool {
+        String path = dir + "/" + filename;
+        String json = readFn(path.c_str());
+        if (json.length() == 0) return false;
+
+        JsonDocument doc;
+        if (deserializeJson(doc, json)) return false;
+        doc["status"] = (int)newStatus;
+
+        String updated;
+        serializeJson(doc, updated);
+        return writeFn(path.c_str(), updated);
+    };
+
+    bool updated = false;
+    if (_sd && _sd->isReady()) {
+        String sdDir = sdConversationDir(peerHex);
+        updated = readModifyWrite(
+            [this](const char* p) { return _sd->readString(p); },
+            [this](const char* p, const String& d) { return _sd->writeString(p, d); },
+            sdDir);
+    }
+
+    if (_flash) {
+        String dir = conversationDir(peerHex);
+        bool flashUpdated = readModifyWrite(
+            [this](const char* p) { return _flash->readString(p); },
+            [this](const char* p, const String& d) { return _flash->writeString(p, d); },
+            dir);
+        updated = updated || flashUpdated;
+    }
+
+    return updated;
+}
+
+bool MessageStore::updateMessageStatus(const std::string& peerHex, double timestamp, bool incoming, LXMFStatus newStatus) {
+    char suffix = incoming ? 'i' : 'o';
+
+    auto updateInDir = [&](auto openFn, auto readFn, auto writeFn, const String& dir) -> bool {
+        File d = openFn(dir.c_str());
+        if (!d || !d.isDirectory()) {
+            if (d) d.close();
+            return false;
+        }
+
+        std::vector<String> candidates;
+        File entry = d.openNextFile();
+        while (entry) {
+            if (!entry.isDirectory()) {
+                String name = entry.name();
+                if (name.endsWith(".json") && name.endsWith(String("_") + suffix + ".json")) {
+                    candidates.push_back(name);
+                }
+            }
+            entry.close();
+            entry = d.openNextFile();
+        }
+        d.close();
+
+        std::sort(candidates.begin(), candidates.end(), [](const String& a, const String& b) { return a > b; });
+        for (const auto& fname : candidates) {
+            String path = dir + "/" + fname;
+            String json = readFn(path.c_str());
+            if (json.length() == 0) continue;
+
+            JsonDocument doc;
+            if (deserializeJson(doc, json)) continue;
+            double ts = doc["ts"] | 0.0;
+            if (ts != timestamp) continue;
+
+            doc["status"] = (int)newStatus;
+            String updatedJson;
+            serializeJson(doc, updatedJson);
+            return writeFn(path.c_str(), updatedJson);
+        }
+        return false;
+    };
+
+    bool updated = false;
+    if (_sd && _sd->isReady()) {
+        String sdDir = sdConversationDir(peerHex);
+        updated = updateInDir(
+            [this](const char* p) { return _sd->openDir(p); },
+            [this](const char* p) { return _sd->readString(p); },
+            [this](const char* p, const String& d) { return _sd->writeString(p, d); },
+            sdDir);
+    }
+
+    if (_flash) {
+        String dir = conversationDir(peerHex);
+        bool flashUpdated = updateInDir(
+            [this](const char* p) { return _flash->openDir(p); },
+            [this](const char* p) { return _flash->readString(p); },
+            [this](const char* p, const String& d) { return _flash->writeString(p, d); },
+            dir);
+        updated = updated || flashUpdated;
+    }
+
+    return updated;
 }
 
 uint32_t MessageStore::readLastReadCounter(const std::string& peerHex) const {

@@ -50,10 +50,14 @@ void LoRaInterface::send_outgoing(const RNS::Bytes& data) {
         return;
     }
 
-    if (_txPending || _splitTxPending) {
+    if (_txPending || _splitTxPending || _splitRxPending) {
         if ((int)_txQueue.size() < TX_QUEUE_MAX) {
             _txQueue.push_back(data);
-            Serial.printf("[LORA_IF] TX queued (%d in queue)\n", (int)_txQueue.size());
+            if (_splitRxPending) {
+                Serial.printf("[LORA_IF] TX deferred (split RX pending, %d in queue)\n", (int)_txQueue.size());
+            } else {
+                Serial.printf("[LORA_IF] TX queued (%d in queue)\n", (int)_txQueue.size());
+            }
         } else {
             Serial.println("[LORA_IF] TX queue full, dropping oldest");
             _txQueue.pop_front();
@@ -130,18 +134,19 @@ void LoRaInterface::loop() {
             if (_splitTxPending) {
                 _splitTxPending = false;
 
+                size_t frame2Size = _splitTxRemaining.size();
                 Serial.printf("[LORA_IF] TX SPLIT frame 2: %d+1 bytes\n",
-                    (int)_splitTxRemaining.size());
+                    (int)frame2Size);
 
                 _radio->beginPacket();
                 _radio->write(_splitTxHeader);
-                _radio->write(_splitTxRemaining.data(), _splitTxRemaining.size());
+                _radio->write(_splitTxRemaining.data(), frame2Size);
                 _radio->endPacket(true);
 
                 _txPending = true;
                 _splitTxRemaining = RNS::Bytes();
 
-                float airtimeMs = _radio->getAirtime(_splitTxRemaining.size() + RNODE_HEADER_L);
+                float airtimeMs = _radio->getAirtime(frame2Size + RNODE_HEADER_L);
                 _airtimeAccumMs += airtimeMs;
                 return;
             }
@@ -159,16 +164,22 @@ void LoRaInterface::loop() {
         return;
     }
 
-    // Split RX timeout: discard stale partial packets
+    // Split RX timeout: discard stale partial packets and drain deferred TX
     if (_splitRxPending && (millis() - _splitRxTimestamp > SPLIT_RX_TIMEOUT_MS)) {
         Serial.println("[LORA_IF] RX SPLIT timeout, discarding partial");
         _splitRxPending = false;
         _splitRxBuffer = RNS::Bytes();
+        if (!_txQueue.empty() && !_txPending) {
+            RNS::Bytes next = _txQueue.front();
+            _txQueue.pop_front();
+            transmitNow(next);
+            return;
+        }
     }
 
-    // Periodic RX debug (5s for Ratcom — more frequent than Ratdeck's 30s)
+    // Periodic RX debug
     static unsigned long lastRxDebug = 0;
-    if (millis() - lastRxDebug > 5000) {
+    if (millis() - lastRxDebug > 30000) {
         lastRxDebug = millis();
         int rssi = _radio->currentRssi();
         uint8_t status = _radio->getStatus();
@@ -225,12 +236,16 @@ void LoRaInterface::loop() {
             InterfaceImpl::handle_incoming(_splitRxBuffer);
             _splitRxBuffer = RNS::Bytes();
 
-            if (!_txPending) {
+            if (!_txQueue.empty() && !_txPending) {
+                RNS::Bytes next = _txQueue.front();
+                _txQueue.pop_front();
+                transmitNow(next);
+            } else if (!_txPending) {
                 _radio->receive();
             }
             return;
         } else {
-            Serial.printf("[LORA_IF] RX SPLIT seq mismatch (had 0x%02X, got 0x%02X), restarting\n",
+            Serial.printf("[LORA_IF] RX SPLIT new seq (had 0x%02X, got 0x%02X), previous frame 2 lost\n",
                 _splitRxSeq, seq);
             _splitRxSeq = seq;
             _splitRxBuffer = RNS::Bytes(raw + RNODE_HEADER_L, payloadSize);
@@ -241,9 +256,7 @@ void LoRaInterface::loop() {
     }
 
     if (_splitRxPending) {
-        Serial.println("[LORA_IF] RX non-split while waiting for split frame 2, discarding partial");
-        _splitRxPending = false;
-        _splitRxBuffer = RNS::Bytes();
+        Serial.printf("[LORA_IF] RX non-split %d bytes while awaiting split frame 2 (kept)\n", payloadSize);
     }
 
     Serial.printf("[LORA_IF] RX %d bytes (hdr=0x%02X, payload=%d), RSSI=%d, SNR=%.1f\n",

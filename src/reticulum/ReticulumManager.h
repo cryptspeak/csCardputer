@@ -50,6 +50,7 @@ public:
     // Identity
     const RNS::Identity& identity() const { return _identity; }
     String identityHash() const;
+    String destinationHashHex() const;
     String destinationHashStr() const;
 
     // Transport status

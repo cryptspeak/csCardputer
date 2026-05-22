@@ -31,6 +31,10 @@ static std::string truncUTF8(const std::string& name, size_t maxChars) {
 // Helper: format a node line
 static void formatNodeLine(char* line, size_t lineSize, const DiscoveredNode& node) {
     std::string displayName = truncUTF8(node.name, 18);
+    if (node.lastSeen == 0) {
+        snprintf(line, lineSize, "%-20s saved", displayName.c_str());
+        return;
+    }
     unsigned long ago = (millis() - node.lastSeen) / 1000;
     if (ago < 60) {
         if (node.hops < 128)
@@ -47,6 +51,7 @@ static void formatNodeLine(char* line, size_t lineSize, const DiscoveredNode& no
 
 // Helper: staleness color for a node
 static uint16_t stalenessColor(const DiscoveredNode& node) {
+    if (node.lastSeen == 0) return Theme::MUTED;
     unsigned long ageMs = millis() - node.lastSeen;
     if (ageMs > 1800000) return Theme::MUTED;
     if (ageMs > 300000) return Theme::BORDER + 0x0220;

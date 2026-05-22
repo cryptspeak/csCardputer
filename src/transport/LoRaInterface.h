@@ -21,6 +21,7 @@ public:
 
     int lastRxRssi() const { return _lastRxRssi; }
     float lastRxSnr() const { return _lastRxSnr; }
+    bool isOnline() const { return _online; }
 
 protected:
     virtual void send_outgoing(const RNS::Bytes& data) override;

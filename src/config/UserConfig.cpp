@@ -27,6 +27,45 @@ static String loadFromNVS() {
     return json;
 }
 
+static bool validLoRaFrequency(uint32_t freq) {
+    return (freq >= 863000000UL && freq <= 870000000UL) ||
+           (freq >= 902000000UL && freq <= 928000000UL) ||
+           (freq >= 920000000UL && freq <= 925000000UL);
+}
+
+void UserConfig::sanitizeSettings() {
+    if (_settings.radioRegion >= REGION_COUNT) _settings.radioRegion = REGION_AMERICAS;
+    if (!validLoRaFrequency(_settings.loraFrequency)) {
+        _settings.loraFrequency = REGION_FREQ[_settings.radioRegion];
+    }
+    _settings.loraSF = constrain(_settings.loraSF, 5, 12);
+    _settings.loraBW = constrain(_settings.loraBW, 7800UL, 500000UL);
+    _settings.loraCR = constrain(_settings.loraCR, 5, 8);
+    _settings.loraTxPower = constrain(_settings.loraTxPower, -9, 22);
+
+    _settings.screenDimTimeout = constrain(_settings.screenDimTimeout, 5, 3600);
+    _settings.screenOffTimeout = constrain(_settings.screenOffTimeout, 10, 7200);
+    if (_settings.screenOffTimeout < _settings.screenDimTimeout) {
+        _settings.screenOffTimeout = _settings.screenDimTimeout;
+    }
+    _settings.brightness = constrain(_settings.brightness, 1, 255);
+    _settings.audioVolume = constrain(_settings.audioVolume, 0, 100);
+
+    _settings.utcOffset = constrain(_settings.utcOffset, -12, 14);
+    if (_settings.timezoneIdx >= 21) _settings.timezoneIdx = 6;
+    _settings.autoIfaceMaxPeers = constrain(_settings.autoIfaceMaxPeers, 1, 16);
+
+    std::vector<TCPEndpoint> cleanTcp;
+    cleanTcp.reserve(std::min((size_t)MAX_TCP_CONNECTIONS, _settings.tcpConnections.size()));
+    for (auto& ep : _settings.tcpConnections) {
+        ep.host.trim();
+        if (ep.host.isEmpty() || ep.port == 0) continue;
+        cleanTcp.push_back(ep);
+        if (cleanTcp.size() >= MAX_TCP_CONNECTIONS) break;
+    }
+    _settings.tcpConnections = cleanTcp;
+}
+
 // ---------------------------------------------------------------------------
 // JSON serialization helpers
 // ---------------------------------------------------------------------------
@@ -97,10 +136,12 @@ bool UserConfig::parseJson(const String& json) {
                   (int)_settings.wifiMode,
                   _settings.wifiSTASSID.c_str(),
                   _settings.displayName.c_str());
+    sanitizeSettings();
     return true;
 }
 
-String UserConfig::serializeToJson() const {
+String UserConfig::serializeToJson() {
+    sanitizeSettings();
     JsonDocument doc;
 
     doc["lora_freq"] = _settings.loraFrequency;

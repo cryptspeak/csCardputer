@@ -18,6 +18,93 @@ struct FSLock {
     SemaphoreHandle_t _m;
 };
 
+namespace {
+const char* FLASH_PARTITION_LABELS[] = {"littlefs", "spiffs"};
+constexpr const char* FLASH_BASE_PATH = "/littlefs";
+
+const char* mountLittleFS(bool formatOnFail) {
+    for (const char* label : FLASH_PARTITION_LABELS) {
+        if (LittleFS.begin(formatOnFail, FLASH_BASE_PATH, 10, label)) {
+            Serial.printf("[FLASH] LittleFS %s on partition '%s'\n",
+                          formatOnFail ? "formatted and mounted" : "mounted",
+                          label);
+            return label;
+        }
+    }
+    return nullptr;
+}
+
+bool ensureDirLocked(const char* path) {
+    if (!path || path[0] == '\0' || strcmp(path, "/") == 0) return true;
+    if (LittleFS.exists(path)) return true;
+
+    String pathStr(path);
+    int lastSlash = pathStr.lastIndexOf('/');
+    if (lastSlash > 0) {
+        String parent = pathStr.substring(0, lastSlash);
+        if (!ensureDirLocked(parent.c_str())) return false;
+    }
+    return LittleFS.mkdir(path) || LittleFS.exists(path);
+}
+
+String fullPathForEntry(const char* dirPath, const char* entryName) {
+    if (!entryName || entryName[0] == '\0') return "";
+    String name(entryName);
+    if (name.startsWith("/")) return name;
+    String dir(dirPath);
+    if (dir.endsWith("/")) return dir + name;
+    return dir + "/" + name;
+}
+
+void recoverAtomicArtifact(const String& artifactPath,
+                           int& recovered,
+                           int& removedTmp,
+                           int& removedBak) {
+    if (artifactPath.endsWith(".tmp")) {
+        if (LittleFS.remove(artifactPath.c_str())) removedTmp++;
+        return;
+    }
+
+    if (!artifactPath.endsWith(".bak")) return;
+
+    String primaryPath = artifactPath.substring(0, artifactPath.length() - 4);
+    if (LittleFS.exists(primaryPath.c_str())) {
+        if (LittleFS.remove(artifactPath.c_str())) removedBak++;
+        return;
+    }
+
+    if (LittleFS.rename(artifactPath.c_str(), primaryPath.c_str())) {
+        recovered++;
+        Serial.printf("[FLASH] Recovered backup: %s\n", primaryPath.c_str());
+    } else {
+        Serial.printf("[FLASH] Failed to recover backup: %s\n", artifactPath.c_str());
+    }
+}
+
+void recoverArtifactsInDir(const char* dirPath,
+                           int& recovered,
+                           int& removedTmp,
+                           int& removedBak) {
+    File dir = LittleFS.open(dirPath);
+    if (!dir || !dir.isDirectory()) {
+        if (dir) dir.close();
+        return;
+    }
+
+    File entry = dir.openNextFile();
+    while (entry) {
+        String fullPath = fullPathForEntry(dirPath, entry.name());
+        bool isArtifact = fullPath.endsWith(".tmp") || fullPath.endsWith(".bak");
+        entry.close();
+        if (isArtifact) {
+            recoverAtomicArtifact(fullPath, recovered, removedTmp, removedBak);
+        }
+        entry = dir.openNextFile();
+    }
+    dir.close();
+}
+}  // namespace
+
 bool FlashStore::begin() {
     // Create mutex before any LittleFS access
     if (!_mutex) {
@@ -25,85 +112,64 @@ bool FlashStore::begin() {
     }
 
     FSLock lock(_mutex);
+    _ready = false;
 
-    if (!LittleFS.begin(true)) {  // true = format if mount fails
-        Serial.println("[FLASH] LittleFS mount failed!");
-        return false;
+    const char* mountedLabel = mountLittleFS(false);
+    if (!mountedLabel) {
+        Serial.println("[FLASH] LittleFS mount failed on known labels; formatting data partition...");
+        mountedLabel = mountLittleFS(true);
+        if (!mountedLabel) {
+            Serial.println("[FLASH] LittleFS format/mount failed on all known labels!");
+            return false;
+        }
     }
     _ready = true;
 
     // Ensure required directories
-    LittleFS.mkdir("/identity");
-    LittleFS.mkdir("/transport");
-    LittleFS.mkdir("/config");
-    LittleFS.mkdir("/contacts");
-    LittleFS.mkdir("/messages");
+    ensureDirLocked("/identity");
+    ensureDirLocked("/transport");
+    ensureDirLocked("/config");
+    ensureDirLocked("/contacts");
+    ensureDirLocked("/messages");
 
     Serial.printf("[FLASH] LittleFS ready, total=%lu, used=%lu\n",
                   (unsigned long)LittleFS.totalBytes(),
                   (unsigned long)LittleFS.usedBytes());
 
-    // Clean orphaned .tmp and .bak files left from interrupted atomic writes
-    cleanOrphanedFiles();
+    recoverAtomicArtifacts();
 
     return true;
 }
 
-void FlashStore::cleanOrphanedFiles() {
-    // Scan top-level directories for orphaned .tmp/.bak files
+void FlashStore::recoverAtomicArtifacts() {
     static const char* dirs[] = {"/config", "/contacts", "/identity", "/transport"};
-    int cleaned = 0;
+    int recovered = 0;
+    int removedTmp = 0;
+    int removedBak = 0;
 
     for (const char* dirPath : dirs) {
-        File dir = LittleFS.open(dirPath);
-        if (!dir || !dir.isDirectory()) continue;
-        File entry = dir.openNextFile();
-        while (entry) {
-            String name = entry.name();
-            entry.close();
-            if (name.endsWith(".tmp") || name.endsWith(".bak")) {
-                String fullPath = String(dirPath) + "/" + name;
-                LittleFS.remove(fullPath.c_str());
-                cleaned++;
-            }
-            entry = dir.openNextFile();
-        }
-        dir.close();
+        recoverArtifactsInDir(dirPath, recovered, removedTmp, removedBak);
     }
 
-    // Also scan message subdirectories
     File msgRoot = LittleFS.open("/messages");
     if (msgRoot && msgRoot.isDirectory()) {
         File peerDir = msgRoot.openNextFile();
         while (peerDir) {
             if (peerDir.isDirectory()) {
-                String peerPath = String("/messages/") + peerDir.name();
+                String peerPath = fullPathForEntry("/messages", peerDir.name());
                 peerDir.close();
-                File d = LittleFS.open(peerPath);
-                if (d && d.isDirectory()) {
-                    File entry = d.openNextFile();
-                    while (entry) {
-                        String name = entry.name();
-                        entry.close();
-                        if (name.endsWith(".tmp") || name.endsWith(".bak")) {
-                            String fullPath = peerPath + "/" + name;
-                            LittleFS.remove(fullPath.c_str());
-                            cleaned++;
-                        }
-                        entry = d.openNextFile();
-                    }
-                }
-                d.close();
+                recoverArtifactsInDir(peerPath.c_str(), recovered, removedTmp, removedBak);
             } else {
                 peerDir.close();
             }
             peerDir = msgRoot.openNextFile();
         }
     }
-    msgRoot.close();
+    if (msgRoot) msgRoot.close();
 
-    if (cleaned > 0) {
-        Serial.printf("[FLASH] Cleaned %d orphaned .tmp/.bak files\n", cleaned);
+    if (recovered || removedTmp || removedBak) {
+        Serial.printf("[FLASH] Atomic recovery: restored=%d removed_tmp=%d removed_bak=%d\n",
+                      recovered, removedTmp, removedBak);
     }
 }
 
@@ -116,8 +182,7 @@ void FlashStore::end() {
 bool FlashStore::ensureDir(const char* path) {
     if (!_ready) return false;
     FSLock lock(_mutex);
-    if (LittleFS.exists(path)) return true;
-    return LittleFS.mkdir(path);
+    return ensureDirLocked(path);
 }
 
 bool FlashStore::exists(const char* path) {
@@ -191,7 +256,11 @@ bool FlashStore::writeAtomic(const char* path, const uint8_t* data, size_t len) 
     // Step 3: Rename current to .bak (if exists)
     if (LittleFS.exists(path)) {
         LittleFS.remove(bakPath.c_str());
-        LittleFS.rename(path, bakPath.c_str());
+        if (!LittleFS.rename(path, bakPath.c_str())) {
+            LittleFS.remove(tmpPath.c_str());
+            Serial.printf("[FLASH] writeAtomic: backup rename failed for %s\n", path);
+            return false;
+        }
     }
 
     // Step 4: Rename .tmp to primary
@@ -200,6 +269,7 @@ bool FlashStore::writeAtomic(const char* path, const uint8_t* data, size_t len) 
         if (LittleFS.exists(bakPath.c_str())) {
             LittleFS.rename(bakPath.c_str(), path);
         }
+        LittleFS.remove(tmpPath.c_str());
         return false;
     }
 

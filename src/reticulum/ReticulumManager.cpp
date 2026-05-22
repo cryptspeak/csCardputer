@@ -7,6 +7,7 @@
 #include <map>
 #include <unordered_map>
 #include <string>
+#include <utility>
 
 // RAII lock guard for the shared LittleFS mutex
 struct FSLock {
@@ -62,8 +63,95 @@ size_t LittleFSFileSystem::write_file(const char* file_path, const RNS::Bytes& d
     return written;
 }
 
+namespace {
+bool ensureLittleFSDirLocked(const String& dir) {
+    if (dir.length() == 0 || dir == "/") return true;
+    if (LittleFS.exists(dir.c_str())) return true;
+    int lastSlash = dir.lastIndexOf('/');
+    if (lastSlash > 0) {
+        if (!ensureLittleFSDirLocked(dir.substring(0, lastSlash))) return false;
+    }
+    return LittleFS.mkdir(dir.c_str()) || LittleFS.exists(dir.c_str());
+}
+
+class LittleFSStreamImpl : public RNS::FileStreamImpl {
+public:
+    explicit LittleFSStreamImpl(File&& f) : _f(std::move(f)) {}
+    ~LittleFSStreamImpl() override { close(); }
+
+protected:
+    const char* name() override {
+        FSLock lock;
+        return _f ? _f.name() : "";
+    }
+
+    size_t size() override {
+        FSLock lock;
+        return _f ? _f.size() : 0;
+    }
+
+    void close() override {
+        FSLock lock;
+        if (_f) _f.close();
+    }
+
+    size_t write(uint8_t byte) override {
+        FSLock lock;
+        return _f ? _f.write(byte) : 0;
+    }
+
+    size_t write(const uint8_t* buffer, size_t len) override {
+        FSLock lock;
+        return _f ? _f.write(buffer, len) : 0;
+    }
+
+    int available() override {
+        FSLock lock;
+        return _f ? _f.available() : 0;
+    }
+
+    int read() override {
+        FSLock lock;
+        return _f ? _f.read() : -1;
+    }
+
+    int peek() override {
+        FSLock lock;
+        return _f ? _f.peek() : -1;
+    }
+
+    void flush() override {
+        FSLock lock;
+        if (_f) _f.flush();
+    }
+
+private:
+    File _f;
+};
+}  // namespace
+
 RNS::FileStream LittleFSFileSystem::open_file(const char* file_path, RNS::FileStream::MODE file_mode) {
-    return {RNS::Type::NONE};
+    const char* mode = "r";
+    if (file_mode == RNS::FileStream::MODE_WRITE) {
+        mode = "w";
+    } else if (file_mode == RNS::FileStream::MODE_APPEND) {
+        mode = "a";
+    } else if (file_mode != RNS::FileStream::MODE_READ) {
+        return {RNS::Type::NONE};
+    }
+
+    FSLock lock;
+    if (file_mode != RNS::FileStream::MODE_READ) {
+        String path(file_path);
+        int lastSlash = path.lastIndexOf('/');
+        if (lastSlash > 0) {
+            ensureLittleFSDirLocked(path.substring(0, lastSlash));
+        }
+    }
+
+    File f = LittleFS.open(file_path, mode);
+    if (!f) return {RNS::Type::NONE};
+    return RNS::FileStream(new LittleFSStreamImpl(std::move(f)));
 }
 
 bool LittleFSFileSystem::remove_file(const char* file_path) {
@@ -386,6 +474,11 @@ String ReticulumManager::destinationHashStr() const {
         return String((hex.substr(0, 6) + "::" + hex.substr(hex.length() - 6, 6)).c_str());
     }
     return String(hex.c_str());
+}
+
+String ReticulumManager::destinationHashHex() const {
+    if (!_destination) return "unknown";
+    return String(_destination.hash().toHex().c_str());
 }
 
 size_t ReticulumManager::pathCount() const {

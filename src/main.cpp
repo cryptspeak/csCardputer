@@ -40,6 +40,7 @@
 #include "transport/BLEStub.h"
 #include "hal/GPSManager.h"
 #include <Preferences.h>
+#include <atomic>
 #include <list>
 #include <esp_system.h>
 #include <freertos/task.h>
@@ -68,6 +69,7 @@ WiFiInterface* wifiImpl = nullptr;
 RNS::Interface wifiIface({RNS::Type::NONE});
 std::vector<TCPClientInterface*> tcpClients;
 std::list<RNS::Interface> tcpIfaces;  // Must persist — Transport stores references (list: no realloc)
+std::list<TCPClientInterface*> retiredTcpClients;
 AutoInterfaceWrapper autoIface;
 bool autoIfaceDeferredStart = false;
 unsigned long autoIfaceDeferredAt = 0;
@@ -103,6 +105,13 @@ bool bootLoopRecovery = false;
 bool wifiSTAStarted = false;
 bool wifiSTAConnected = false;
 
+// STA reconnects are scheduled from WiFi events and fired from loop().
+std::atomic<bool> wifiNeedsReconnect{false};
+std::atomic<unsigned long> wifiReconnectAt{0};
+std::atomic<uint8_t> wifiReconnectAttempt{0};
+constexpr unsigned long WIFI_BACKOFF_MS[4] = {5000, 15000, 60000, 300000};
+constexpr unsigned long WIFI_NETIF_SETTLE_MS = 1500;
+
 // --- Timing state (millis-based throttling) ---
 unsigned long lastRNS = 0;
 unsigned long lastRender = 0;
@@ -123,18 +132,92 @@ constexpr unsigned long TCP_GLOBAL_BUDGET_MS = 12;      // Max cumulative TCP ti
 // Power-aware RNS interval
 unsigned long rnsInterval = RNS_INTERVAL_MS;
 
+static void scheduleWiFiReconnect() {
+    uint8_t attempt = wifiReconnectAttempt.load();
+    uint8_t idx = attempt < 4 ? attempt : 3;
+    unsigned long backoff = WIFI_BACKOFF_MS[idx];
+    if (backoff < WIFI_NETIF_SETTLE_MS) backoff = WIFI_NETIF_SETTLE_MS;
+    wifiReconnectAt.store(millis() + backoff);
+    wifiNeedsReconnect.store(true);
+    if (attempt < 4) wifiReconnectAttempt.store(attempt + 1);
+}
+
+static void onWiFiEvent(WiFiEvent_t event) {
+    switch (event) {
+        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+            if (wifiNeedsReconnect.load()) break;
+            scheduleWiFiReconnect();
+            WiFi.disconnect(false, true);
+            break;
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP6:
+            wifiNeedsReconnect.store(false);
+            wifiReconnectAttempt.store(0);
+            break;
+        default:
+            break;
+    }
+}
+
+static void beginSTAConnection() {
+    auto& s = userConfig.settings();
+    if (s.wifiSTASSID.isEmpty()) return;
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(false);
+    if (s.autoIfaceEnabled) WiFi.enableIpV6();
+    WiFi.begin(s.wifiSTASSID.c_str(), s.wifiSTAPassword.c_str());
+    wifiSTAStarted = true;
+    Serial.printf("[WIFI] STA begin (SSID: %s)\n", s.wifiSTASSID.c_str());
+}
+
+static const char* currentPosixTZ() {
+    if (userConfig.settings().timezoneSet &&
+        userConfig.settings().timezoneIdx < TIMEZONE_COUNT) {
+        return TIMEZONE_TABLE[userConfig.settings().timezoneIdx].posixTZ;
+    }
+
+    static char tz[16];
+    snprintf(tz, sizeof(tz), "UTC%d", -userConfig.settings().utcOffset);
+    return tz;
+}
+
 // =============================================================================
 // TCP client management — stop old clients, create new from config
 // =============================================================================
 
+static void drainRetiredTCPClients() {
+    for (auto it = retiredTcpClients.begin(); it != retiredTcpClients.end(); ) {
+        TCPClientInterface* tcp = *it;
+        if (!tcp || tcp->canDestroy()) {
+            if (tcp) delete tcp;
+            it = retiredTcpClients.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+static void retireTCPClient(TCPClientInterface* tcp) {
+    if (!tcp) return;
+    tcp->stop();
+    if (tcp->canDestroy()) {
+        delete tcp;
+    } else {
+        retiredTcpClients.push_back(tcp);
+    }
+}
+
 static void reloadTCPClients() {
-    // Stop, deregister, and free existing clients
-    for (auto* tcp : tcpClients) { tcp->stop(); delete tcp; }
+    // Stop and deregister existing clients
     for (auto& iface : tcpIfaces) {
         RNS::Transport::deregister_interface(iface);
     }
+    for (auto* tcp : tcpClients) {
+        retireTCPClient(tcp);
+    }
     tcpClients.clear();
     tcpIfaces.clear();
+    drainRetiredTCPClients();
 
     // Create new clients from current config
     if (WiFi.status() == WL_CONNECTED) {
@@ -555,18 +638,17 @@ void setup() {
         ui.render();
         if (!userConfig.settings().wifiSTASSID.isEmpty()) {
             WiFi.mode(WIFI_STA);
-            WiFi.setAutoReconnect(true);
+            WiFi.onEvent(onWiFiEvent);
             // AutoInterface needs an IPv6 link-local address.  Must be
             // enabled BEFORE WiFi.begin() so SLAAC starts on STA association.
             if (userConfig.settings().autoIfaceEnabled) {
                 WiFi.enableIpV6();
                 Serial.println("[WIFI] IPv6 enabled (AutoInterface ON)");
             }
-            WiFi.begin(userConfig.settings().wifiSTASSID.c_str(),
-                       userConfig.settings().wifiSTAPassword.c_str());
-            wifiSTAStarted = true;
-            Serial.printf("[WIFI] STA non-blocking begin (SSID: %s)\n",
-                          userConfig.settings().wifiSTASSID.c_str());
+            beginSTAConnection();
+            if (WiFi.status() != WL_CONNECTED && !wifiNeedsReconnect.load()) {
+                scheduleWiFiReconnect();
+            }
         } else {
             Serial.println("[WIFI] STA mode but SSID empty — skipping");
         }
@@ -661,7 +743,7 @@ void setup() {
     settingsScreen.setWiFi(wifiImpl);
     settingsScreen.setTCPClients(&tcpClients);
     settingsScreen.setRNS(&rns);
-    settingsScreen.setIdentityHash(rns.destinationHashStr());
+    settingsScreen.setIdentityHash(rns.destinationHashHex());
 
     tabScreens[TabBar::TAB_HOME]  = &homeScreen;
     tabScreens[TabBar::TAB_MSGS]  = &messagesScreen;
@@ -867,21 +949,32 @@ void loop() {
 
     // 5. WiFi STA non-blocking connection handler
     if (wifiSTAStarted) {
+        if (wifiNeedsReconnect.load() && WiFi.status() != WL_CONNECTED &&
+            (long)(millis() - wifiReconnectAt.load()) >= 0) {
+            wifiNeedsReconnect.store(false);
+            uint8_t attempt = wifiReconnectAttempt.load();
+            Serial.printf("[WIFI] Reconnect attempt #%u\n", (unsigned)attempt);
+            beginSTAConnection();
+            if (WiFi.status() != WL_CONNECTED && !wifiNeedsReconnect.load()) {
+                scheduleWiFiReconnect();
+            }
+        }
+
         bool connected = (WiFi.status() == WL_CONNECTED);
         if (connected && !wifiSTAConnected) {
             wifiSTAConnected = true;
+            wifiNeedsReconnect.store(false);
+            wifiReconnectAttempt.store(0);
             Serial.printf("[WIFI] STA connected: %s\n", WiFi.localIP().toString().c_str());
 
             // NTP time sync — configTzTime() is non-blocking (starts SNTP daemon)
             {
                 static bool ntpStarted = false;
                 if (!ntpStarted) {
-                    int8_t off = userConfig.settings().utcOffset;
-                    char tz[16];
-                    snprintf(tz, sizeof(tz), "UTC%d", -off);
+                    const char* tz = currentPosixTZ();
                     configTzTime(tz, "pool.ntp.org", "time.nist.gov");
                     ntpStarted = true;
-                    Serial.printf("[NTP] Time sync started (UTC%+d, TZ=%s)\n", off, tz);
+                    Serial.printf("[NTP] Time sync started (TZ=%s)\n", tz);
                 }
             }
 
@@ -898,10 +991,12 @@ void loop() {
             }
         } else if (!connected && wifiSTAConnected) {
             wifiSTAConnected = false;
-            // Stop, free, and deregister TCP clients cleanly
-            for (auto* tcp : tcpClients) { tcp->stop(); delete tcp; }
+            // Stop and deregister TCP clients cleanly
             for (auto& iface : tcpIfaces) {
                 RNS::Transport::deregister_interface(iface);
+            }
+            for (auto* tcp : tcpClients) {
+                retireTCPClient(tcp);
             }
             tcpClients.clear();
             tcpIfaces.clear();
@@ -954,6 +1049,7 @@ void loop() {
 
     // 6. TCP transport (with global budget) — skip if RNS was overloaded
     {
+        drainRetiredTCPClients();
         bool skipTcp = (rnsDuration > 200);
         if (!skipTcp && wifiImpl) wifiImpl->loop();
         if (!skipTcp) {
@@ -961,6 +1057,7 @@ void loop() {
             for (auto* tcp : tcpClients) {
                 if (millis() - tcpBudgetStart >= TCP_GLOBAL_BUDGET_MS) break;
                 tcp->loop();
+                yield();
             }
         }
         // AutoInterface always runs — non-blocking, time-gated.  Skipping

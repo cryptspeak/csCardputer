@@ -4,11 +4,18 @@
 bool SDStore::begin(SPIClass* spi, int csPin) {
     if (!spi) return false;
 
-    // Attach to existing HSPI bus (already started by radio)
-    if (!SD.begin(csPin, *spi)) {
-        Serial.println("[SD] Card not detected or mount failed");
-        _ready = false;
-        return false;
+    pinMode(csPin, OUTPUT);
+    digitalWrite(csPin, HIGH);
+    delay(10);
+
+    if (!SD.begin(csPin, *spi, 4000000)) {
+        Serial.printf("[SD] Mount failed (CS=%d), retrying...\n", csPin);
+        delay(100);
+        if (!SD.begin(csPin, *spi, 4000000)) {
+            Serial.println("[SD] Card not detected or mount failed");
+            _ready = false;
+            return false;
+        }
     }
 
     uint8_t cardType = SD.cardType();
@@ -24,6 +31,20 @@ bool SDStore::begin(SPIClass* spi, int csPin) {
     if (cardType == CARD_SDHC) typeStr = "SDHC";
 
     _ready = true;
+
+    SD.end();
+    if (!SD.begin(csPin, *spi, 16000000)) {
+        if (!SD.begin(csPin, *spi, 4000000)) {
+            Serial.println("[SD] 16MHz failed and 4MHz fallback failed");
+            _ready = false;
+            return false;
+        }
+        Serial.println("[SD] 16MHz failed, using 4MHz");
+    } else {
+        Serial.println("[SD] SPI speed: 16MHz");
+    }
+    _ready = true;
+
     Serial.printf("[SD] %s card ready, total=%llu MB, used=%llu MB\n",
                   typeStr, totalBytes() / (1024 * 1024), usedBytes() / (1024 * 1024));
     return true;
@@ -113,8 +134,14 @@ bool SDStore::writeAtomic(const char* path, const uint8_t* data, size_t len) {
     // Step 3: Rename current to .bak (if exists)
     if (SD.exists(path)) {
         SD.remove(bakPath.c_str());
-        SD.rename(path, bakPath.c_str());
+        if (!SD.rename(path, bakPath.c_str())) {
+            SD.remove(tmpPath.c_str());
+            Serial.printf("[SD] writeAtomic: backup rename failed for %s\n", path);
+            return false;
+        }
     }
+
+    SD.remove(path);
 
     // Step 4: Rename .tmp to primary
     if (!SD.rename(tmpPath.c_str(), path)) {
@@ -122,8 +149,11 @@ bool SDStore::writeAtomic(const char* path, const uint8_t* data, size_t len) {
         if (SD.exists(bakPath.c_str())) {
             SD.rename(bakPath.c_str(), path);
         }
+        SD.remove(tmpPath.c_str());
         return false;
     }
+
+    SD.remove(bakPath.c_str());
 
     return true;
 }

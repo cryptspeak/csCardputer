@@ -77,7 +77,8 @@ public:
 
 private:
     bool parseJson(const String& json);
-    String serializeToJson() const;
+    String serializeToJson();
+    void sanitizeSettings();
 
     UserSettings _settings;
 };

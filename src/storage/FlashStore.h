@@ -45,7 +45,7 @@ public:
     static SemaphoreHandle_t mutex();
 
 private:
-    void cleanOrphanedFiles();
+    void recoverAtomicArtifacts();
     bool _ready = false;
     static SemaphoreHandle_t _mutex;
 };

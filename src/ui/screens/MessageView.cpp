@@ -313,7 +313,9 @@ void MessageView::sendCurrentInput() {
     RNS::Bytes destHash;
     destHash.assignHex(_peerHex.c_str());
 
-    _lxmf->sendMessage(destHash, text);
+    if (!_lxmf->sendMessage(destHash, text)) {
+        return;
+    }
     _input.clear();
 
     // Store outgoing message in pending so it survives refresh before disk write completes

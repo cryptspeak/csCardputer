@@ -235,7 +235,7 @@ void AnnounceManager::received_announce(
     auto it = _hashIndex.find(key);
     if (it != _hashIndex.end()) {
         auto& node = _nodes[it->second];
-        if (now - node.lastSeen < ANNOUNCE_MIN_INTERVAL_MS) return;
+        if (node.lastSeen != 0 && now - node.lastSeen < ANNOUNCE_MIN_INTERVAL_MS) return;
         if (!name.empty()) node.name = name;
         node.lastSeen = now;
         if (_loraIf) { node.rssi = _loraIf->lastRxRssi(); node.snr = _loraIf->lastRxSnr(); }
@@ -382,7 +382,7 @@ void AnnounceManager::evictStale(unsigned long maxAgeMs) {
     _nodes.erase(
         std::remove_if(_nodes.begin(), _nodes.end(),
             [now, maxAgeMs](const DiscoveredNode& n) {
-                return !n.saved && (now - n.lastSeen > maxAgeMs);
+                return !n.saved && n.lastSeen != 0 && (now - n.lastSeen > maxAgeMs);
             }),
         _nodes.end());
     rebuildIndex();
@@ -410,10 +410,6 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
     JsonDocument doc;
     doc["hash"] = hexHash;
     doc["name"] = node.name;
-    doc["rssi"] = node.rssi;
-    doc["snr"] = node.snr;
-    doc["hops"] = node.hops;
-    doc["lastSeen"] = node.lastSeen;
 
     String json;
     serializeJson(doc, json);
@@ -505,10 +501,10 @@ void AnnounceManager::loadContacts() {
                                 node.hash = hash;
                                 node.name = sanitizeName(doc["name"] | "");
                                 if (node.name.empty()) node.name = hexHash.substr(0, 12);
-                                node.rssi = doc["rssi"] | 0;
-                                node.snr = doc["snr"] | 0.0f;
-                                node.hops = doc["hops"] | 0;
-                                node.lastSeen = doc["lastSeen"] | (unsigned long)millis();
+                                node.rssi = 0;
+                                node.snr = 0.0f;
+                                node.hops = 0;
+                                node.lastSeen = 0;
                                 node.saved = true;
                                 _hashIndex[key] = (int)_nodes.size();
                                 _nodes.push_back(node);
