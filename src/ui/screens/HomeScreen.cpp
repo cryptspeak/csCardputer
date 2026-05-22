@@ -12,9 +12,9 @@ static const RadioPresetHome HOME_PRESETS[] = {
     {"Short Slow",    8,  250000, 5,  14},
     {"Medium Fast",   9,  250000, 5,  17},
     {"Medium Slow",   10, 250000, 5,  17},
-    {"Long Turbo",    11, 500000, 8,  22},
-    {"Long Fast",     11, 250000, 5,  22},
-    {"Long Moderate", 11, 125000, 8,  22},
+    {"Long Turbo",    11, 500000, 8,  LORA_MAX_TX_POWER},
+    {"Long Fast",     11, 250000, 5,  LORA_MAX_TX_POWER},
+    {"Long Moderate", 11, 125000, 8,  LORA_MAX_TX_POWER},
 };
 static const char* detectPresetName(const UserSettings& s) {
     for (int i = 0; i < 8; i++) {

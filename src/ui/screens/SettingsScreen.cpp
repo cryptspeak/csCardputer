@@ -34,9 +34,9 @@ static const RadioPreset PRESETS[] = {
     {"Short Slow",    8,  250000, 5,  14},
     {"Medium Fast",   9,  250000, 5,  17},
     {"Medium Slow",   10, 250000, 5,  17},
-    {"Long Turbo",    11, 500000, 8,  22},
-    {"Long Fast",     11, 250000, 5,  22},
-    {"Long Moderate", 11, 125000, 8,  22},
+    {"Long Turbo",    11, 500000, 8,  LORA_MAX_TX_POWER},
+    {"Long Fast",     11, 250000, 5,  LORA_MAX_TX_POWER},
+    {"Long Moderate", 11, 125000, 8,  LORA_MAX_TX_POWER},
 };
 static constexpr int NUM_PRESETS = 8;
 
@@ -418,8 +418,8 @@ void SettingsScreen::commitEdit(const std::string& value) {
             case 3:  // CR: 5-8
                 if (v >= 5 && v <= 8) s.loraCR = (uint8_t)v;
                 break;
-            case 4:  // TX Power: -9 to 22
-                if (v >= -9 && v <= 22) s.loraTxPower = (int8_t)v;
+            case 4:  // TX Power
+                if (v >= -9 && v <= LORA_MAX_TX_POWER) s.loraTxPower = (int8_t)v;
                 break;
         }
         applyAndSave();

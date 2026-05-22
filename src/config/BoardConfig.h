@@ -23,7 +23,8 @@
 #define LORA_DEFAULT_BW         250000   // Long Fast preset (matches Ratdeck)
 #define LORA_DEFAULT_SF         11
 #define LORA_DEFAULT_CR         5
-#define LORA_DEFAULT_TX_POWER   22       // Long Fast preset
+#define LORA_MAX_TX_POWER       20       // Cap LoRa-1262 module maximum
+#define LORA_DEFAULT_TX_POWER   20       // Long Fast preset, capped for Cardputer ADV cap
 #define LORA_DEFAULT_PREAMBLE   18
 
 // --- Keyboard (TCA8418 via I2C) ---
