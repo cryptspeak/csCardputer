@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <M5Cardputer.h>
+#include <utility/PI4IOE5V6408_Class.hpp>
 #include <SPI.h>
 
 #include "config/BoardConfig.h"
@@ -373,11 +374,11 @@ void onHotkeyRadioTest() {
 // Announce with display name
 // =============================================================================
 
-// LXMF announce app_data, current upstream format:
-//   [display_name(bin), stamp_cost(uint), supported_functionality(array)]
+// LXMF announce app_data:
+//   [display_name(bin), stamp_cost(nil|uint), supported_functionality(array)]
 // Always emit fixarray(3) so Python LXMF doesn't default auto_compress=True for
-// our destinations. Empty supported_functionality list = we do NOT support
-// SF_COMPRESSION (bz2) — see microReticulum/src/Compression/BZ2.cpp.
+// our destinations. stamp_cost=nil means no inbound stamp is required. Empty
+// supported_functionality list = we do NOT support SF_COMPRESSION (bz2).
 static RNS::Bytes encodeAnnounceName(const String& name) {
     size_t nameLen = name.length();
     if (nameLen > 31) nameLen = 31;
@@ -387,7 +388,7 @@ static RNS::Bytes encodeAnnounceName(const String& name) {
     buf[i++] = 0xC4;                   // bin 8
     buf[i++] = (uint8_t)nameLen;
     if (nameLen) { memcpy(buf + i, name.c_str(), nameLen); i += nameLen; }
-    buf[i++] = 0x00;                   // stamp_cost = 0
+    buf[i++] = 0xC0;                   // stamp_cost = nil (no stamp required)
     buf[i++] = 0x90;                   // empty fixarray (no SF_* supported)
     return RNS::Bytes(buf, i);
 }
@@ -401,6 +402,28 @@ static void announceWithName(bool silent) {
     if (!silent) {
         ui.statusBar().flashAnnounce();
     }
+}
+
+static bool enableCapLoRaRfSwitch() {
+    if (!m5::In_I2C.isEnabled()) {
+        if (!m5::In_I2C.begin(I2C_NUM_0, KB_SDA, KB_SCL)) {
+            Serial.println("[RADIO] Cap LoRa-1262 IOE init failed: I2C unavailable");
+            return false;
+        }
+    }
+
+    m5::PI4IOE5V6408_Class ioe(LORA_CAP_IOE_ADDR, 400000, &m5::In_I2C);
+    if (!ioe.begin()) {
+        Serial.println("[RADIO] Cap LoRa-1262 IOE not detected; RF switch enable skipped");
+        return false;
+    }
+
+    ioe.setDirection(LORA_CAP_RF_SW_PIN, true);
+    ioe.setHighImpedance(LORA_CAP_RF_SW_PIN, false);
+    ioe.digitalWrite(LORA_CAP_RF_SW_PIN, true);
+    delay(5);
+    Serial.println("[RADIO] Cap LoRa-1262 RF antenna switch enabled (IOE P0=HIGH)");
+    return true;
 }
 
 // =============================================================================
@@ -494,6 +517,7 @@ void setup() {
     // Initialize radio
     bootScreen.setProgress(0.4f, "Starting radio...");
     ui.render();
+    enableCapLoRaRfSwitch();
     if (radio.begin(LORA_DEFAULT_FREQ)) {
         radio.setSpreadingFactor(LORA_DEFAULT_SF);
         radio.setSignalBandwidth(LORA_DEFAULT_BW);

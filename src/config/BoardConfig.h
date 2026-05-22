@@ -23,9 +23,14 @@
 #define LORA_DEFAULT_BW         250000   // Long Fast preset (matches Ratdeck)
 #define LORA_DEFAULT_SF         11
 #define LORA_DEFAULT_CR         5
-#define LORA_MAX_TX_POWER       20       // Cap LoRa-1262 module maximum
-#define LORA_DEFAULT_TX_POWER   20       // Long Fast preset, capped for Cardputer ADV cap
+#define LORA_MAX_TX_POWER       22       // Cap LoRa-1262 documented maximum
+#define LORA_DEFAULT_TX_POWER   22       // Long Fast preset
 #define LORA_DEFAULT_PREAMBLE   18
+
+// Cap LoRa-1262 RF antenna switch enable (PI4IOE5V6408 on Cardputer I2C).
+// P0 must be driven HIGH before radio TX/RX for the external antenna path.
+#define LORA_CAP_IOE_ADDR       0x43
+#define LORA_CAP_RF_SW_PIN      0
 
 // --- Keyboard (TCA8418 via I2C) ---
 #define KB_SDA       8

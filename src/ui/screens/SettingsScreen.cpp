@@ -949,10 +949,10 @@ void SettingsScreen::applyRadioPreset(int preset) {
     buildRadioMenu();
     if (_rns) {
         // Encode display name + capability advertisement as msgpack app_data.
-        // Format: [display_name(bin), stamp_cost(uint), supported_functionality(array)].
-        // Empty supported_functionality list signals no SF_COMPRESSION (bz2) support
-        // so Python LXMF disables auto_compress for us. Always emit fixarray(3) —
-        // a shorter form makes Python default to "compression supported".
+        // Format: [display_name(bin), stamp_cost(nil|uint), supported_functionality(array)].
+        // stamp_cost=nil means no inbound stamp is required. Empty
+        // supported_functionality list signals no SF_COMPRESSION (bz2) support
+        // so Python LXMF disables auto_compress for us.
         const String& name = _config ? _config->settings().displayName : String();
         size_t nameLen = name.length();
         if (nameLen > 31) nameLen = 31;
@@ -962,7 +962,7 @@ void SettingsScreen::applyRadioPreset(int preset) {
         buf[i++] = 0xC4;                   // bin 8
         buf[i++] = (uint8_t)nameLen;
         if (nameLen) { memcpy(buf + i, name.c_str(), nameLen); i += nameLen; }
-        buf[i++] = 0x00;                   // stamp_cost = 0
+        buf[i++] = 0xC0;                   // stamp_cost = nil (no stamp required)
         buf[i++] = 0x90;                   // empty fixarray (no SF_* supported)
         _rns->announce(RNS::Bytes(buf, i));
     }

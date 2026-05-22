@@ -289,6 +289,7 @@ bool SX1262::ensureLoRaMode(const char* context) {
 
     Serial.printf("[SX1262] %s found packet_type=0x%02X (%s), reasserting LoRa\n",
                   context ? context : "config", packetType, packetTypeName(packetType));
+    standby();
     return loraMode();
 }
 
@@ -429,6 +430,8 @@ int SX1262::endPacket(bool async) {
 
     if (async) {
         _txActive = true;
+        Serial.printf("[SX1262] TX ASYNC: payload=%d calc=%.0fms\n",
+                      _payloadLength, getAirtime(_payloadLength));
         return 1;
     }
 
@@ -476,6 +479,8 @@ bool SX1262::isTxBusy() {
     uint8_t buf[2] = {0};
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
     if (buf[1] & IRQ_TX_DONE_MASK_6X) {
+        Serial.printf("[SX1262] TX ASYNC OK: %dms\n",
+                      (int)(millis() - _txStartMs));
         uint8_t mask[2] = {0x00, IRQ_TX_DONE_MASK_6X};
         executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
         _txActive = false;
