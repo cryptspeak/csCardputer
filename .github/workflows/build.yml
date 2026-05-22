@@ -26,8 +26,8 @@ jobs:
 
       - name: Merge single .bin for M5Burner
         run: |
-          esptool.py --chip esp32s3 merge_bin \
-            --flash_mode dio --flash_size 8MB \
+          esptool.py --chip esp32s3 merge-bin \
+            --flash-mode dio --flash-size 8MB \
             -o ratcom-merged.bin \
             0x0000 .pio/build/ratcom_915/bootloader.bin \
             0x8000 .pio/build/ratcom_915/partitions.bin \
@@ -88,8 +88,8 @@ jobs:
 
       - name: Merge single .bin for M5Burner
         run: |
-          esptool.py --chip esp32s3 merge_bin \
-            --flash_mode dio --flash_size 8MB \
+          esptool.py --chip esp32s3 merge-bin \
+            --flash-mode dio --flash-size 8MB \
             -o ratcom-merged.bin \
             0x0000 .pio/build/ratcom_915/bootloader.bin \
             0x8000 .pio/build/ratcom_915/partitions.bin \

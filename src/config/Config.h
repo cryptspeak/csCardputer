@@ -5,9 +5,9 @@
 // =============================================================================
 
 #define RATCOM_VERSION_MAJOR  1
-#define RATCOM_VERSION_MINOR  8
-#define RATCOM_VERSION_PATCH  0
-#define RATCOM_VERSION_STRING "1.8.0-beta"
+#define RATCOM_VERSION_MINOR  9
+#define RATCOM_VERSION_PATCH  2
+#define RATCOM_VERSION_STRING "1.9.2"
 
 // --- Feature Flags ---
 #define HAS_DISPLAY     true
