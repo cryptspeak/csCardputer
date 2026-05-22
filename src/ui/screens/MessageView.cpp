@@ -5,7 +5,7 @@
 #include <time.h>
 
 namespace {
-constexpr int CHAT_HEADER_H = 17;
+constexpr int CHAT_HEADER_H = Theme::SECTION_HEADER_H;
 constexpr int CHAT_INPUT_H = Theme::CHAR_H + 4;
 
 int visibleChatLines() {
@@ -107,8 +107,7 @@ void MessageView::refreshMessages() {
         }
 
         if (msg.incoming) {
-            std::string sender = peerDisplayName();
-            line.text = std::string(ts) + " " + sender + "> " + msg.content;
+            line.text = std::string(ts) + " them> " + msg.content;
             line.color = Theme::PRIMARY;
         } else {
             line.text = std::string(ts) + " you> " + msg.content;
@@ -139,11 +138,12 @@ void MessageView::render(M5Canvas& canvas) {
 
     int baseY = Theme::CONTENT_Y;
 
-    // Header: node name or peer hash + back hint
+    // Header: peer name or hash.
     std::string header;
     if (_am) {
         const DiscoveredNode* node = _am->findNodeByHex(_peerHex);
         if (node && !node->name.empty()) header = node->name;
+        if (header.empty()) header = _am->lookupName(_peerHex);
     }
     if (header.empty()) {
         if (_peerHex.size() >= 8) {
@@ -232,14 +232,6 @@ bool MessageView::handleKey(const KeyEvent& event) {
     return false;
 }
 
-std::string MessageView::peerDisplayName() const {
-    if (_am) {
-        const DiscoveredNode* node = _am->findNodeByHex(_peerHex);
-        if (node && !node->name.empty()) return node->name;
-    }
-    return _peerHex.size() >= 4 ? _peerHex.substr(0, 4) : _peerHex;
-}
-
 void MessageView::notifyNewMessage(const LXMFMessage& msg) {
     std::string senderHex = msg.incoming ?
         msg.sourceHash.toHex() : msg.destHash.toHex();
@@ -278,8 +270,7 @@ void MessageView::notifyNewMessage(const LXMFMessage& msg) {
     }
 
     if (msg.incoming) {
-        std::string sender = peerDisplayName();
-        line.text = std::string(ts) + " " + sender + "> " + msg.content;
+        line.text = std::string(ts) + " them> " + msg.content;
         line.color = Theme::PRIMARY;
     } else {
         line.text = std::string(ts) + " you> " + msg.content;

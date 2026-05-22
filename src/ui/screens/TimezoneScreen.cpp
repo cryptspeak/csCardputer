@@ -12,7 +12,7 @@ void TimezoneScreen::onEnter() {
 void TimezoneScreen::render(M5Canvas& canvas) {
     int y = Theme::CONTENT_Y;
 
-    const int headerH = 17;
+    const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y + 2, 3, headerH - 4, Theme::ACCENT);
     Theme::useUiFont(canvas);

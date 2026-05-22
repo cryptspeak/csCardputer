@@ -41,8 +41,8 @@ constexpr uint16_t BADGE_TEXT     = BG;
 // --- Layout Metrics ---
 constexpr int SCREEN_W       = 240;
 constexpr int SCREEN_H       = 135;
-constexpr int STATUS_BAR_H   = 18;
-constexpr int TAB_BAR_H      = 22;
+constexpr int STATUS_BAR_H   = 14;
+constexpr int TAB_BAR_H      = 18;
 constexpr int CONTENT_Y      = STATUS_BAR_H;
 constexpr int CONTENT_H      = SCREEN_H - STATUS_BAR_H - TAB_BAR_H;
 constexpr int CONTENT_W      = SCREEN_W;
@@ -52,9 +52,10 @@ constexpr const lgfx::GFXfont* FONT_SMALL = nullptr;  // Built-in 6x8
 constexpr int FONT_SIZE       = 1;
 constexpr int CHAR_W          = 6;
 constexpr int CHAR_H          = 8;
-constexpr int UI_FONT_H       = 12;
-constexpr int LIST_ROW_H      = 15;
-constexpr int SHELL_TEXT_Y    = 2;
+constexpr int UI_FONT_H       = 10;
+constexpr int LIST_ROW_H      = 14;
+constexpr int SECTION_HEADER_H = 15;
+constexpr int SHELL_TEXT_Y    = 3;
 
 // --- Tab Bar ---
 constexpr int TAB_COUNT       = 4;
@@ -70,7 +71,7 @@ inline void useSmallFont(M5Canvas& canvas) {
 
 inline void useUiFont(M5Canvas& canvas) {
     canvas.setFont(nullptr);
-    canvas.setTextSize(1.5f);
+    canvas.setTextSize(1.2f);
 }
 
 }  // namespace Theme

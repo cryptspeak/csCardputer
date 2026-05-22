@@ -555,7 +555,7 @@ void SettingsScreen::render(M5Canvas& canvas) {
     // Header with accent bar
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
                              "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN"};
-    const int headerH = 17;
+    const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
     canvas.setTextColor(Theme::ACCENT);
@@ -614,7 +614,7 @@ void SettingsScreen::render(M5Canvas& canvas) {
 
 void SettingsScreen::renderAbout(M5Canvas& canvas) {
     int y0 = Theme::CONTENT_Y;
-    const int headerH = 17;
+    const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
     Theme::useUiFont(canvas);

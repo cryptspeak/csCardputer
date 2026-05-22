@@ -220,7 +220,7 @@ void NodesScreen::render(M5Canvas& canvas) {
     int y = Theme::CONTENT_Y;
 
     if (_showingActions) {
-        const int headerH = 17;
+        const int headerH = Theme::SECTION_HEADER_H;
         canvas.fillRect(0, y, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
         canvas.fillRect(0, y + 2, 3, headerH - 4, Theme::PRIMARY);
         Theme::useUiFont(canvas);
@@ -250,7 +250,7 @@ void NodesScreen::render(M5Canvas& canvas) {
 
         _actionList.render(canvas, 0, y, Theme::SCREEN_W, Theme::CONTENT_H - (y - Theme::CONTENT_Y));
     } else {
-        const int headerH = 17;
+        const int headerH = Theme::SECTION_HEADER_H;
         canvas.fillRect(0, y, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
         canvas.fillRect(0, y + 2, 3, headerH - 4, Theme::ACCENT);
         Theme::useUiFont(canvas);
@@ -269,7 +269,7 @@ void NodesScreen::render(M5Canvas& canvas) {
             Theme::useSmallFont(canvas);
             canvas.setTextColor(Theme::MUTED);
             canvas.setCursor(4, y + 10);
-            canvas.print("No nodes discovered yet.");
+            canvas.print("No peers discovered yet.");
             canvas.setCursor(4, y + 22);
             canvas.print("Waiting for announces...");
         } else {

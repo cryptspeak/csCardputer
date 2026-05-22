@@ -36,7 +36,6 @@ public:
 private:
     void refreshMessages();
     void sendCurrentInput();
-    std::string peerDisplayName() const;
 
     // Cached display lines
     struct ChatLine {

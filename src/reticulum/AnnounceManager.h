@@ -90,12 +90,14 @@ private:
     bool _contactsDirty = false;
     bool _nameCacheDirty = false;
     unsigned long _lastContactSave = 0;
+    unsigned long _lastNameCacheSave = 0;
     std::map<std::string, std::string> _nameCache;  // hexHash → displayName
     unsigned long _globalAnnounceWindowStart = 0;
     unsigned int _globalAnnounceCount = 0;
     static constexpr unsigned int MAX_GLOBAL_ANNOUNCES_PER_SEC = 8;
     static constexpr int MAX_NODES = RATCOM_MAX_NODES;
-    static constexpr int MAX_NAME_CACHE = 60;   // Only contacts + recent — non-contacts don't persist
+    static constexpr int MAX_NAME_CACHE = 60;
     static constexpr unsigned long CONTACT_SAVE_INTERVAL_MS = 30000;
+    static constexpr unsigned long NAME_CACHE_SAVE_INTERVAL_MS = 5000;
     static constexpr unsigned long ANNOUNCE_MIN_INTERVAL_MS = 200;  // Rate-limit announce processing
 };

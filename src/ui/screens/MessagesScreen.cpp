@@ -21,6 +21,9 @@ void MessagesScreen::refreshList() {
             if (node && !node->name.empty()) {
                 label = node->name;
             }
+            if (label.empty()) {
+                label = _am->lookupName(peerHex);
+            }
         }
         if (label.empty()) {
             if (peerHex.size() >= 8) {
@@ -100,7 +103,7 @@ void MessagesScreen::render(M5Canvas& canvas) {
 
     int y = Theme::CONTENT_Y;
 
-    const int headerH = 17;
+    const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y + 2, 3, headerH - 4, Theme::ACCENT);
     canvas.setTextColor(Theme::ACCENT);
@@ -116,6 +119,7 @@ void MessagesScreen::render(M5Canvas& canvas) {
         if (_am) {
             const DiscoveredNode* node = _am->findNodeByHex(_contextPeerHex);
             if (node && !node->name.empty()) label = node->name;
+            if (label.empty()) label = _am->lookupName(_contextPeerHex);
         }
         if (label.empty()) label = _contextPeerHex.substr(0, 8);
         canvas.drawString(label.c_str(), 8, y);

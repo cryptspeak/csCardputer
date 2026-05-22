@@ -23,7 +23,7 @@ public:
     void onExit() override;
     void render(M5Canvas& canvas) override;
     bool handleKey(const KeyEvent& event) override;
-    const char* title() const override { return "Nodes"; }
+    const char* title() const override { return "Peers"; }
 
 private:
     void refreshList();

@@ -237,7 +237,15 @@ void AnnounceManager::received_announce(
     if (it != _hashIndex.end()) {
         auto& node = _nodes[it->second];
         if (node.lastSeen != 0 && now - node.lastSeen < ANNOUNCE_MIN_INTERVAL_MS) return;
-        if (!name.empty()) node.name = name;
+        if (!name.empty()) {
+            node.name = name;
+            std::string destHex = destination_hash.toHex();
+            _nameCache[destHex] = name;
+            while ((int)_nameCache.size() > MAX_NAME_CACHE) {
+                _nameCache.erase(_nameCache.begin());
+            }
+            _nameCacheDirty = true;
+        }
         node.lastSeen = now;
         if (_loraIf) { node.rssi = _loraIf->lastRxRssi(); node.snr = _loraIf->lastRxSnr(); }
         if (node.saved) {
@@ -246,21 +254,12 @@ void AnnounceManager::received_announce(
             if (!idHex.empty()) node.identityHex = idHex;
             node.hops = RNS::Transport::hops_to(destination_hash);
             _contactsDirty = true;
-            if (!name.empty()) {
-                std::string destHex = destination_hash.toHex();
-                _nameCache[destHex] = name;
-                _nameCacheDirty = true;
-            }
         }
-        // Non-contacts: name updated in RAM only — no disk writes, no name cache persist
         return;
     }
 
     // New node — lightweight for non-contacts
     std::string destHex = destination_hash.toHex();
-
-    // Name cache: only persist for contacts (checked later if saved)
-    // Non-contacts get name in RAM via node.name — no _nameCache entry
 
     // Make room if full — evict non-contacts first
     if ((int)_nodes.size() >= MAX_NODES) {
@@ -300,6 +299,13 @@ void AnnounceManager::received_announce(
     if (_loraIf) { node.rssi = _loraIf->lastRxRssi(); node.snr = _loraIf->lastRxSnr(); }
     _hashIndex[key] = (int)_nodes.size();
     _nodes.push_back(node);
+    if (!name.empty()) {
+        _nameCache[destHex] = name;
+        while ((int)_nameCache.size() > MAX_NAME_CACHE) {
+            _nameCache.erase(_nameCache.begin());
+        }
+        _nameCacheDirty = true;
+    }
     // Skip identityHex for non-contacts (saves ~64 bytes per node)
 }
 
@@ -395,6 +401,7 @@ void AnnounceManager::clearAll() {
     _nameCache.clear();
     _contactsDirty = false;
     _nameCacheDirty = false;
+    _lastNameCacheSave = 0;
     Serial.println("[ANNOUNCE] Cleared all nodes and name cache");
 }
 
@@ -577,8 +584,9 @@ void AnnounceManager::loop() {
         saveContacts();
         Serial.println("[ANNOUNCE] Deferred contact save complete");
     }
-    if (_nameCacheDirty && now - _lastContactSave >= CONTACT_SAVE_INTERVAL_MS) {
+    if (_nameCacheDirty && now - _lastNameCacheSave >= NAME_CACHE_SAVE_INTERVAL_MS) {
         _nameCacheDirty = false;
+        _lastNameCacheSave = now;
         saveNameCache();
     }
 }
@@ -590,6 +598,12 @@ std::string AnnounceManager::lookupName(const std::string& hexHash) const {
     // Fall back to cached names
     auto it = _nameCache.find(hexHash);
     if (it != _nameCache.end()) return it->second;
+    for (const auto& kv : _nameCache) {
+        if (hexHash.length() < kv.first.length() &&
+            kv.first.substr(0, hexHash.length()) == hexHash) {
+            return kv.second;
+        }
+    }
     return "";
 }
 

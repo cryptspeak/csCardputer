@@ -46,7 +46,9 @@ void StatusBar::render(M5Canvas& canvas) {
     int batLevel = clampBatteryLevel((int)(_smoothedBattery + 0.5f));
     bool charging = isChargingKnown();
 
-    int bx = 4, by = 5, bw = 17, bh = 9;
+    Theme::useSmallFont(canvas);
+
+    int bx = 3, by = 3, bw = 14, bh = 7;
     uint16_t batColor = Theme::SUCCESS;
     if (batLevel <= 10) batColor = Theme::ERROR;
     else if (batLevel <= 30) batColor = Theme::WARNING;
@@ -55,16 +57,15 @@ void StatusBar::render(M5Canvas& canvas) {
     int fillW = (bw - 2) * batLevel / 100;
     if (fillW > 0) canvas.fillRect(bx + 1, by + 1, fillW, bh - 2, batColor);
     if (charging) {
-        canvas.drawLine(bx + 9, by + 1, bx + 6, by + 5, Theme::BG);
-        canvas.drawLine(bx + 6, by + 5, bx + 10, by + 5, Theme::BG);
-        canvas.drawLine(bx + 10, by + 5, bx + 7, by + 8, Theme::BG);
+        canvas.drawLine(bx + 7, by + 1, bx + 5, by + 4, Theme::BG);
+        canvas.drawLine(bx + 5, by + 4, bx + 8, by + 4, Theme::BG);
+        canvas.drawLine(bx + 8, by + 4, bx + 6, by + 7, Theme::BG);
     }
 
     char batStr[6];
     snprintf(batStr, sizeof(batStr), "%d%%", batLevel);
 
-    Theme::useUiFont(canvas);
-    int textX = bx + bw + 6;
+    int textX = bx + bw + 5;
     time_t t = time(nullptr);
     if (t > 1700000000) {
         struct tm* tm = localtime(&t);
@@ -123,7 +124,7 @@ void StatusBar::render(M5Canvas& canvas) {
     uint16_t loraColor = _loraOnline ? Theme::SUCCESS : Theme::MUTED;
     int loraW = canvas.textWidth(loraStr);
     rx -= loraW;
-    canvas.fillCircle(rx - 5, Theme::STATUS_BAR_H / 2, 3, loraColor);
+    canvas.fillCircle(rx - 5, Theme::STATUS_BAR_H / 2, 2, loraColor);
     canvas.setTextColor(loraColor);
     canvas.setCursor(rx, Theme::SHELL_TEXT_Y);
     canvas.print(loraStr);
