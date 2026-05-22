@@ -35,7 +35,7 @@ void StatusBar::render(M5Canvas& canvas) {
 
     canvas.setTextSize(Theme::FONT_SIZE);
 
-    // Left side: battery icon + %, plus clock when time is known.
+    // Left side: battery icon + rotating status text.
     unsigned long now = millis();
     if (_smoothedBattery < 0 || now - _lastBatteryRead >= 2000) {
         int raw = readBatteryLevel();
@@ -68,20 +68,20 @@ void StatusBar::render(M5Canvas& canvas) {
 
     char batStr[6];
     snprintf(batStr, sizeof(batStr), "%d%%", batLevel);
-    canvas.setTextColor(charging ? Theme::ACCENT : batColor);
-    canvas.setCursor(textX, Theme::STATUS_PAD);
-    canvas.print(batStr);
-    textX += strlen(batStr) * Theme::CHAR_W + 6;
 
-    // Show clock too if system time is valid (GPS or NTP).
     time_t t = time(nullptr);
     if (t > 1700000000) {
         struct tm* tm = localtime(&t);
         char clockStr[8];
         snprintf(clockStr, sizeof(clockStr), "%d:%02d", tm->tm_hour, tm->tm_min);
-        canvas.setTextColor(Theme::PRIMARY);
+        bool showClock = ((now / 5000UL) % 2UL) == 1UL;
+        canvas.setTextColor(showClock ? Theme::PRIMARY : (charging ? Theme::ACCENT : batColor));
         canvas.setCursor(textX, Theme::STATUS_PAD);
-        canvas.print(clockStr);
+        canvas.print(showClock ? clockStr : batStr);
+    } else {
+        canvas.setTextColor(charging ? Theme::ACCENT : batColor);
+        canvas.setCursor(textX, Theme::STATUS_PAD);
+        canvas.print(batStr);
     }
 
     // Center text — flash "ANNOUNCED" briefly, otherwise show mode
