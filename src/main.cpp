@@ -695,7 +695,6 @@ void setup() {
     bootScreen.setProgress(1.0f, "Ready");
     ui.render();
     audio.playBoot();
-    delay(400);
 
     bootComplete = true;
     ui.statusBar().setTransportMode("Ratspeak.org");
@@ -1087,6 +1086,7 @@ void loop() {
         pendingMessageSound = false;
         audio.playMessage();
     }
+    audio.loop();
 
     // 10. Power management
     power.loop();
