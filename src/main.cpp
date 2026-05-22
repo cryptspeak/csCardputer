@@ -42,7 +42,11 @@
 #include "hal/GPSManager.h"
 #include <Preferences.h>
 #include <atomic>
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
 #include <list>
+#include <string>
 #include <esp_system.h>
 #include <freertos/task.h>
 
@@ -452,10 +456,34 @@ static void setDiagnosticMinTxPower() {
     Serial.println("[SERIAL] transient TX power set to -9 dBm");
 }
 
+static bool setDiagnosticTxPower(int powerDbm) {
+    if (powerDbm < -9 || powerDbm > LORA_MAX_TX_POWER) {
+        Serial.printf("[SERIAL] TX power out of range: %d dBm (allowed -9..%d)\n",
+                      powerDbm, (int)LORA_MAX_TX_POWER);
+        return false;
+    }
+    radio.setTxPower((int8_t)powerDbm);
+    radio.receive();
+    Serial.printf("[SERIAL] transient TX power set to %d dBm\n", powerDbm);
+    return true;
+}
+
 static void toggleDiagnosticInvertIQ() {
     radio.setInvertIQ(!radio.getInvertIQ());
     radio.receive();
     Serial.printf("[SERIAL] IQ inversion %s\n", radio.getInvertIQ() ? "ON" : "off");
+}
+
+static bool setDiagnosticFrequency(uint32_t frequencyHz) {
+    if (frequencyHz < 150000000UL || frequencyHz > 960000000UL) {
+        Serial.printf("[SERIAL] frequency out of range: %lu Hz (allowed 150000000..960000000)\n",
+                      (unsigned long)frequencyHz);
+        return false;
+    }
+    radio.setFrequency(frequencyHz);
+    radio.receive();
+    Serial.printf("[SERIAL] transient frequency set to %lu Hz\n", (unsigned long)frequencyHz);
+    return true;
 }
 
 static void nudgeDiagnosticFrequency(int32_t deltaHz) {
@@ -465,14 +493,192 @@ static void nudgeDiagnosticFrequency(int32_t deltaHz) {
     Serial.printf("[SERIAL] transient frequency set to %lu Hz\n", (unsigned long)next);
 }
 
+static const char* skipSerialSeparators(const char* p) {
+    while (p && (*p == ' ' || *p == '\t' || *p == ':' || *p == '=' || *p == ',')) {
+        ++p;
+    }
+    return p;
+}
+
+static bool hasSerialArgument(const char* p) {
+    p = skipSerialSeparators(p);
+    return p && *p != '\0';
+}
+
+static bool parseSerialLong(const char* p, long& value, const char** rest = nullptr) {
+    p = skipSerialSeparators(p);
+    if (!p || *p == '\0') return false;
+    char* end = nullptr;
+    value = std::strtol(p, &end, 10);
+    if (end == p) return false;
+    if (rest) *rest = end;
+    return true;
+}
+
+static bool parseSerialDestinationHash(const char* p, RNS::Bytes& hash) {
+    p = skipSerialSeparators(p);
+    if (!p || *p == '\0') return false;
+
+    char hex[33] = {0};
+    size_t len = 0;
+    while (*p && len < 32) {
+        unsigned char ch = (unsigned char)*p;
+        if (std::isxdigit(ch)) {
+            hex[len++] = (char)*p;
+        } else if (*p != ' ' && *p != '\t' && *p != ':' && *p != '=' && *p != ',' && *p != '-') {
+            return false;
+        }
+        ++p;
+    }
+
+    if (len != 32) return false;
+    hash.assignHex(hex);
+    return hash.size() == 16;
+}
+
+static bool selectDiagnosticPeer(const char* explicitArg, RNS::Bytes& destHash, std::string& label) {
+    if (hasSerialArgument(explicitArg)) {
+        if (!parseSerialDestinationHash(explicitArg, destHash)) {
+            Serial.println("[SERIAL] invalid LXMF destination hash; expected 32 hex characters");
+            return false;
+        }
+        label = destHash.toHex();
+        return true;
+    }
+
+    if (!announceManager) {
+        Serial.println("[SERIAL] LXMF test failed: announce manager is not ready");
+        return false;
+    }
+
+    const std::string localHex = rns.destination().hash().toHex();
+    for (const auto& node : announceManager->nodes()) {
+        if (node.hash.size() != 16) continue;
+        const std::string nodeHex = node.hash.toHex();
+        if (nodeHex == localHex) continue;
+        destHash = node.hash;
+        label = node.name.empty() ? nodeHex : (node.name + " " + nodeHex);
+        return true;
+    }
+
+    Serial.println("[SERIAL] LXMF test failed: no peer known; send/receive announces first or pass a hash");
+    return false;
+}
+
+static std::string makeDiagnosticLxmfPayload(size_t length) {
+    static constexpr char kPrefix[] = "RATCOM-LXMF-TEST:";
+    static constexpr char kPattern[] =
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    std::string out;
+    out.reserve(length);
+    for (size_t i = 0; kPrefix[i] && out.size() < length; ++i) {
+        out.push_back(kPrefix[i]);
+    }
+    for (size_t i = 0; out.size() < length; ++i) {
+        out.push_back(kPattern[i % (sizeof(kPattern) - 1)]);
+    }
+    return out;
+}
+
+static bool sendDiagnosticLxmf(size_t length, const char* explicitDest) {
+    static constexpr size_t kMaxDiagnosticLxmfChars = 512;
+    if (length == 0 || length > kMaxDiagnosticLxmfChars) {
+        Serial.printf("[SERIAL] LXMF test length out of range: %u (allowed 1..%u)\n",
+                      (unsigned)length, (unsigned)kMaxDiagnosticLxmfChars);
+        return false;
+    }
+
+    RNS::Bytes destHash;
+    std::string peerLabel;
+    if (!selectDiagnosticPeer(explicitDest, destHash, peerLabel)) return false;
+
+    std::string payload = makeDiagnosticLxmfPayload(length);
+    bool ok = lxmf.sendMessage(destHash, payload);
+    Serial.printf("[SERIAL] LXMF test %s: len=%u dest=%s queue=%d\n",
+                  ok ? "queued" : "rejected",
+                  (unsigned)payload.size(),
+                  peerLabel.c_str(),
+                  lxmf.queuedCount());
+    return ok;
+}
+
+static void handleSerialLineCommand(const char* line) {
+    if (!line || !*line) return;
+
+    switch (line[0]) {
+        case 'F': {
+            long value = 0;
+            if (!parseSerialLong(line + 1, value) || value < 0) {
+                Serial.println("[SERIAL] usage: F<frequency_hz>, for example F915000000");
+                return;
+            }
+            setDiagnosticFrequency((uint32_t)value);
+            break;
+        }
+        case 'P': {
+            long value = 0;
+            if (!parseSerialLong(line + 1, value)) {
+                Serial.println("[SERIAL] usage: P<tx_power_dbm>, for example P1 or P5");
+                return;
+            }
+            setDiagnosticTxPower((int)value);
+            break;
+        }
+        case 'L': {
+            long length = 0;
+            const char* rest = nullptr;
+            if (!parseSerialLong(line + 1, length, &rest) || length <= 0) {
+                Serial.println("[SERIAL] usage: L<payload_chars> [dest_hash], for example L120");
+                return;
+            }
+            sendDiagnosticLxmf((size_t)length, rest);
+            break;
+        }
+        default:
+            Serial.printf("[SERIAL] unknown line command '%c'\n", line[0]);
+            break;
+    }
+}
+
 static void printSerialHelp() {
-    Serial.println("[SERIAL] commands: ? help | a announce | t raw-test | d diag | r rssi | p tx-power | m min-power | q iq | +/- freq | f rf-switch");
+    Serial.println("[SERIAL] commands: ? help | a announce | t raw-test | d diag | r rssi | p tx-power-cycle | m min-power | q iq | +/- freq | f rf-switch");
+    Serial.println("[SERIAL] line commands: F<hz> exact-frequency | P<dBm> exact-tx-power | L<len> [dest_hash] LXMF test");
 }
 
 static void handleSerialCommands() {
+    static char line[96];
+    static size_t lineLen = 0;
+    static bool lineActive = false;
+
     while (Serial.available() > 0) {
         char c = (char)Serial.read();
-        if (c == '\r' || c == '\n' || c == ' ') continue;
+        if (lineActive) {
+            if (c == '\r' || c == '\n') {
+                line[lineLen] = '\0';
+                handleSerialLineCommand(line);
+                lineLen = 0;
+                lineActive = false;
+                continue;
+            }
+            if (lineLen + 1 >= sizeof(line)) {
+                Serial.println("[SERIAL] line command too long; discarded");
+                lineLen = 0;
+                lineActive = false;
+                continue;
+            }
+            line[lineLen++] = c;
+            continue;
+        }
+
+        if (c == '\r' || c == '\n' || c == ' ' || c == '\t') continue;
+        if (c == 'F' || c == 'P' || c == 'L') {
+            lineActive = true;
+            lineLen = 0;
+            line[lineLen++] = c;
+            continue;
+        }
+
         switch (c) {
             case '?':
                 printSerialHelp();
@@ -494,7 +700,6 @@ static void handleSerialCommands() {
                 onHotkeyRssiMonitor();
                 break;
             case 'p':
-            case 'P':
                 cycleDiagnosticTxPower();
                 break;
             case 'm':
@@ -514,7 +719,6 @@ static void handleSerialCommands() {
                 nudgeDiagnosticFrequency(-1000);
                 break;
             case 'f':
-            case 'F':
                 enableCapLoRaRfSwitch();
                 break;
             default:
