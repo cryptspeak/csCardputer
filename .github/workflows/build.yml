@@ -33,7 +33,7 @@ jobs:
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ratcom-cardputer-adv-firmware
+          name: rscardputer-firmware
           path: dist/*
 
   release:
@@ -72,12 +72,9 @@ jobs:
           fi
 
           artifacts=(
-            dist/ratcom-cardputer-adv-full.bin
-            dist/ratcom-cardputer-adv-full.zip
-            dist/ratcom-cardputer-adv-ratcom-only.bin
-            dist/ratcom-cardputer-adv-ratcom-only.zip
-            dist/ratcom-cardputer-adv-rnode-only.bin
-            dist/ratcom-cardputer-adv-rnode-only.zip
+            dist/rscardputer-full.zip
+            dist/rscardputer-ratcom.zip
+            dist/rscardputer-rnode.zip
           )
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

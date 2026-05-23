@@ -7,9 +7,9 @@ DIST_DIR ?= dist
 PARTITION_CSV := partitions/rs_cardputer_adv_8mb_dual.csv
 PARTITIONS_BIN := $(BUILD_DIR)/rs_cardputer_adv_partitions.bin
 
-FULL_NAME := ratcom-cardputer-adv-full
-RATCOM_ONLY_NAME := ratcom-cardputer-adv-ratcom-only
-RNODE_ONLY_NAME := ratcom-cardputer-adv-rnode-only
+FULL_NAME := rscardputer-full
+RATCOM_ONLY_NAME := rscardputer-ratcom
+RNODE_ONLY_NAME := rscardputer-rnode
 
 FULL_BIN := $(BUILD_DIR)/$(FULL_NAME).bin
 RATCOM_ONLY_BIN := $(BUILD_DIR)/$(RATCOM_ONLY_NAME).bin
@@ -35,9 +35,14 @@ ifeq ($(PORT),)
 PORT := /dev/ttyACM0
 endif
 
-.PHONY: all build-ratcom build-launcher build-rnode check bundle full-image ratcom-only-image rnode-only-image package release flash clean
+.PHONY: all build prep-cardputer_adv build-ratcom build-launcher build-rnode check bundle full-image ratcom-only-image rnode-only-image package release flash clean
 
 all: bundle
+
+build: package
+
+prep-cardputer_adv:
+	$(MAKE) -C $(RNODE_DIR) prep-cardputer_adv
 
 build-ratcom:
 	python3 -m platformio run -e $(RATCOM_ENV)
@@ -83,9 +88,6 @@ bundle: full-image
 
 package: full-image ratcom-only-image rnode-only-image
 	mkdir -p $(DIST_DIR)
-	cp $(FULL_BIN) $(DIST_DIR)/$(FULL_NAME).bin
-	cp $(RATCOM_ONLY_BIN) $(DIST_DIR)/$(RATCOM_ONLY_NAME).bin
-	cp $(RNODE_ONLY_BIN) $(DIST_DIR)/$(RNODE_ONLY_NAME).bin
 	python3 tools/package_merged_zip.py --image $(FULL_BIN) --name $(FULL_NAME) --output $(DIST_DIR)/$(FULL_NAME).zip
 	python3 tools/package_merged_zip.py --image $(RATCOM_ONLY_BIN) --name $(RATCOM_ONLY_NAME) --output $(DIST_DIR)/$(RATCOM_ONLY_NAME).zip
 	python3 tools/package_merged_zip.py --image $(RNODE_ONLY_BIN) --name $(RNODE_ONLY_NAME) --output $(DIST_DIR)/$(RNODE_ONLY_NAME).zip

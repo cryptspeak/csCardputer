@@ -1,175 +1,182 @@
 <div align="center">
 
-# [Ratcom](https://ratspeak.org/)
+# rsCardputer
 
-**Dual-mode Reticulum firmware for the M5Stack Cardputer Adv.**
+**Dual-mode Ratspeak firmware for the M5Stack Cardputer Adv.**
+
+[![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
+[![Model](https://img.shields.io/badge/model-Cardputer%20Adv-success.svg)](https://docs.m5stack.com/en/core/Cardputer-Adv)
+[![License](https://img.shields.io/badge/license-mixed-blue.svg)](#license)
 
 [Ratspeak](https://github.com/ratspeak/Ratspeak) |
 [rsReticulum](https://github.com/ratspeak/rsReticulum) |
 [rsLXMF](https://github.com/ratspeak/rsLXMF) |
-[Download](https://ratspeak.org/download.html) |
-[Cardputer Adv Docs](https://docs.m5stack.com/en/core/M5Cardputer%20Adv)
-
-[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
-[![RNode: GPL-3.0](https://img.shields.io/badge/bundled%20RNode-GPL--3.0-blue.svg)](docs/LICENSING.md)
-[![PlatformIO](https://img.shields.io/badge/build-PlatformIO-orange.svg)](https://platformio.org/)
-[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#current-state)
-
-[Original demo video: Reticulum Standalone - T-Deck & Cardputer Adv](https://www.youtube.com/watch?v=F6I6fkMPxgI)
+[Downloads](https://ratspeak.org/download.html)
 
 </div>
 
-## What It Is
+---
 
-Ratcom turns the M5Stack Cardputer Adv into a pocket Reticulum device. It can
-run as a standalone encrypted messenger, or it can act as a regular
-host-controlled RNode for Ratspeak, Sideband, or another Reticulum client.
+rsCardputer turns [M5Stack's Cardputer Adv](https://shop.m5stack.com/products/m5stack-cardputer-adv-version-esp32-s3?srsltid=AfmBOoqkAKYv165WC27WbB4bj73CxxMa12pImKTrkvyk9ZtqFUb4_gPt$0) into a local two-mode
+Reticulum device. On boot, the launcher lets you choose between:
 
-The default Cardputer Adv image is a small launcher with two firmware modes:
+- **Ratcom**: a standalone Reticulum/LXMF messenger that runs entirely on the
+  Cardputer Adv.
+- **RNode**: a host-controlled RNode-style interface for Ratspeak,
+  Sideband, or other Reticulum clients over BLE or USB serial.
 
-- **Ratcom** — standalone end-to-end encrypted LXMF messaging over LoRa, TCP
-  over WiFi for bridging, node discovery, identity management, GPS time sync,
-  and on-device settings.
-- **RNode** — a dumb host-controlled RNode-style radio over BLE or USB serial,
-  using Mark Qvist's upstream RNode firmware lineage with Cardputer Adv support.
+Both firmwares live in internal ESP32-S3 flash, with support for SD in the future to reduce flash usage. There are individual releases available for just Ratcom or just RNode as well for those using pre-existing flashers or wanting just one firmware.
 
-Both modes live in internal flash. Switching modes does not require WiFi,
-internet access, an SD card, or an over-the-air update service.
+## Contents
 
-## Current State
+- [Hardware](#hardware)
+- [Flashing](#flashing)
+- [Radio Presets](#radio-presets)
+- [Ratcom Mode](#ratcom-mode)
+- [RNode Mode](#rnode-mode)
+- [Build From Source](#build-from-source)
+- [License](#license)
 
-Ratcom is alpha firmware. The core Cardputer Adv flow works, but this is still
-hardware software: expect sharp edges, bring useful bug reports, and assume
-the release process will keep improving.
+## Hardware
 
-The combined Cardputer Adv image is the recommended install path. Standalone
-Ratcom-only and RNode-only images are built for recovery, testing, and advanced
-users, but normal users should flash the full launcher image.
+The supported Cardputer Adv has:
 
-## What You Get
+- ESP32-S3FN8
+- 8 MB internal flash
+- Built-in keyboard and 240x135 display
+- microSD support (32GB max), optional but recommended
+- **SX1262 LoRa radio***
 
-- Standalone LXMF messaging on the Cardputer Adv.
-- A built-in RNode mode for existing Reticulum clients.
-- A local launcher for switching between modes without reflashing.
-- BLE pairing support in RNode mode.
-- LoRa radio presets plus manual radio configuration.
-- WiFi STA/AP plumbing for Reticulum bridging experiments.
-- SD-card support for Ratcom data where available.
-- Local build outputs for web flasher `.zip` files and merged `.bin` images.
+*LoRa capabilities are only possible with the Cardputer Adv LoRa cap (module), which they usually sell separately. Without it, the Cardputer will only have WiFi/BLE capabilities.
 
-## Install
+## Flashing
 
-Use the [Ratspeak download page](https://ratspeak.org/download.html) when
-public builds are available. Put the Cardputer Adv in download mode, select the
-USB device in the browser, and flash the full Cardputer Adv image.
+For flashing with a pre-built firmware, use [Ratspeak's flasher](https://ratspeak.org/download.html) in a supported browser, and flash the device in just a few clicks.
 
-The full image contains the launcher, Ratcom mode, and RNode mode.
+To flash locally, connect the Cardputer Adv over USB and find
+the serial port:
 
-> **Upgrade warning:** the dual-mode Cardputer Adv firmware uses a different
-> partition layout than older standalone Ratcom builds. Treat it as a full
-> firmware upgrade and expect Ratcom data/config stored in internal flash to be
-> reset. SD-card data under `/ratcom/` may remain present, but migration is not
-> guaranteed or assisted.
+```bash
+ls /dev/cu.usbmodem*      # macOS
+ls /dev/ttyACM*           # Linux
+```
+
+Then flash the merged image:
+
+```bash
+cd rsCardputer
+make flash port=/dev/cu.usbmodem3101
+```
+
+## Radio Presets
+
+| Preset | SF | BW | CR | TXP | Bitrate | Link budget |
+|---|---|---|---|---|---|---|
+| Short Turbo | 7 | 500 kHz | 4/5 | 14 dBm | 21.99 kbps | 140 dB |
+| Short Fast | 7 | 250 kHz | 4/5 | 14 dBm | 10.84 kbps | 143 dB |
+| Short Slow | 8 | 250 kHz | 4/5 | 14 dBm | 6.25 kbps | 145.5 dB |
+| Medium Fast | 9 | 250 kHz | 4/5 | 17 dBm | 3.52 kbps | 148 dB |
+| Medium Slow | 10 | 250 kHz | 4/5 | 17 dBm | 1.95 kbps | 150.5 dB |
+| Long Turbo | 11 | 500 kHz | 4/8 | 22 dBm | 1.34 kbps | 150 dB |
+| **Long Fast** *(default)* | **11** | **250 kHz** | **4/5** | **22 dBm** | **1.07 kbps** | **153 dB** |
+| Long Moderate | 11 | 125 kHz | 4/8 | 22 dBm | 0.34 kbps | 156 dB |
+
+Host clients can change the RNode radio profile through normal RNode commands, typically in-app.
+Ratcom also exposes radio settings on-device.
+
+The supported SX1262 cap is an 850-950 MHz radio target. 868 MHz and 915 MHz
+are valid software profiles for that hardware range. 433 MHz requires 433 MHz
+radio hardware. You are responsible for operating within your local laws.
+
+## Ratcom Mode
+
+Ratcom is the standalone mode. It gives the Cardputer Adv a local Reticulum
+identity, LXMF messaging, LoRa operation, TCP access over WiFi,
+GPS time sync, contact/message storage, and on-device settings.
+
+On first boot, Ratcom asks for timezone - this is so the GPS-received time shows relevant to your timezone, it is not shared with anyone.
+
+## RNode Mode
+
+RNode mode behaves like an RNode radio for any Reticulum client.
+
+- USB CDC serial carries the normal RNode KISS protocol.
+- BLE is enabled for phone/client pairing.
+- Hold `p` or `OK` for three seconds to enter BLE pairing mode.
+- Pairing mode times out after 30 seconds if no client connects.
+- The radio stays idle until the host client connects.
+
+The RNode target self-provisions its EEPROM identity and firmware hash on first
+boot, so users should not need a separate `rnodeconf` setup step to clear
+config or firmware-corrupt warnings.
 
 ## Build From Source
 
-Install PlatformIO and Arduino CLI first. Then build the complete firmware
-family:
+rsCardputer is a single source tree. Ratcom, the RNode target, the launcher,
+partition layout, and package tooling are all included in this repository.
+
+Install prerequisites:
+
+- Python 3.
+- PlatformIO.
+- `arduino-cli`.
+- ESP32 Arduino core and M5 libraries for the RNode build.
+
+Install the Python tools:
 
 ```bash
-git clone https://github.com/ratspeak/ratcom
-cd ratcom
-pip install platformio
-make -C vendor/rnode_firmware prep-cardputer_adv
+python3 -m pip install platformio esptool
+```
+
+One-time RNode dependency setup:
+
+```bash
+make prep-cardputer_adv
+```
+
+Build all firmware images and package the release artifacts:
+
+```bash
 make package
 ```
 
-Flash the recommended full image:
+Build targets are split so each component can also be worked on independently:
+
+```bash
+make build-launcher      # launcher only
+make build-ratcom        # standalone Ratcom app
+make build-rnode         # host-controlled RNode target
+make full-image          # launcher + Ratcom + RNode
+make ratcom-only-image   # standalone Ratcom merged image
+make rnode-only-image    # standalone RNode merged image
+```
+
+Release artifacts are written to `dist/`:
+
+```text
+dist/rscardputer-full.zip
+dist/rscardputer-ratcom.zip
+dist/rscardputer-rnode.zip
+```
+
+Use the `.zip` files with the Ratspeak web flasher. Each zip contains a merged
+factory image and the web-flasher manifest for the Cardputer Adv. Raw `.bin`
+files are internal build outputs under `build/` and are not release artifacts.
+
+Flash the bundled launcher image with:
 
 ```bash
 make flash port=/dev/cu.usbmodem3101
 ```
 
-Build outputs land in `dist/`:
+CI uses the same `make package` flow and publishes the bundled image plus both
+individual firmware images.
 
-| Artifact | Purpose |
-| --- | --- |
-| `ratcom-cardputer-adv-full.bin/.zip` | Recommended launcher + Ratcom + RNode image. |
-| `ratcom-cardputer-adv-ratcom-only.bin/.zip` | Standalone Ratcom image for recovery/debugging. |
-| `ratcom-cardputer-adv-rnode-only.bin/.zip` | Standalone RNode image for recovery/debugging. |
+## License & Contribution
 
-The `.bin` files are merged factory images flashed at offset `0x0`. The `.zip`
-files include the same merged image plus a web-flasher manifest.
+Ratspeak's Ratcom application, launcher, partition tables, and packaging tools are licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
 
-## Using It
+The bundled RNode firmware under `vendor/rnode_firmware/` is licensed under
+the GNU General Public License v3.0. See [LICENSE-RNODE](LICENSE-RNODE).
 
-The launcher is the first screen after flashing or power-on. Select Ratcom or
-RNode and press Enter. If you do nothing, it starts the last-used mode after a
-short timeout.
-
-### Ratcom Mode
-
-On first boot, Ratcom asks for a timezone and display name. Your LXMF address,
-which you share with contacts, is shown on the Home tab.
-
-Navigate with the Cardputer keyboard:
-
-- **Home** — local identity, radio state, announce action, and current radio
-  profile.
-- **Msgs** — local conversations and message entry.
-- **Peers** — discovered LXMF peers.
-- **Settings** — radio, WiFi, SD card, display, audio, about, and reset tools.
-
-Press Enter on the Home tab to announce your identity to nearby peers.
-
-The current radio presets are:
-
-| Preset | SF | BW | CR | TX Power |
-| --- | --- | --- | --- | --- |
-| Short Turbo | 7 | 500 kHz | 4/5 | 14 dBm |
-| Short Fast | 7 | 250 kHz | 4/5 | 14 dBm |
-| Short Slow | 8 | 250 kHz | 4/5 | 14 dBm |
-| Medium Fast | 9 | 250 kHz | 4/5 | 17 dBm |
-| Medium Slow | 10 | 250 kHz | 4/5 | 17 dBm |
-| Long Turbo | 11 | 500 kHz | 4/8 | 22 dBm |
-| Long Fast | 11 | 250 kHz | 4/5 | 22 dBm |
-| Long Moderate | 11 | 125 kHz | 4/8 | 22 dBm |
-
-All radio parameters are individually tunable. Changes apply immediately, no
-reboot required. You are responsible for operating within the laws and
-requirements that apply in your jurisdiction.
-
-### RNode Mode
-
-RNode mode behaves like a host-controlled radio, not a standalone messenger.
-
-- USB CDC serial carries the normal RNode KISS protocol where host support
-  allows it.
-- BLE is enabled for phone/client pairing.
-- Hold `p` or Enter/OK for three seconds to enter BLE pairing mode.
-- Pairing mode times out after 30 seconds if no client connects.
-- Host clients can change the RNode radio profile through normal RNode
-  commands.
-
-RNode mode self-provisions its local configuration and firmware hash on first
-boot, so normal users should not need a separate `rnodeconf` step just to clear
-"not provisioned" or "firmware corrupt" warnings.
-
-## Platform Notes
-
-- Android USB-OTG behavior is still being investigated with Ratspeak and
-  rsReticulum; BLE is the current phone-friendly RNode path.
-- Ratcom WiFi bridging is alpha and will continue to change with the Ratspeak
-  client release.
-- The Cardputer Adv has limited internal flash. The full image is laid out as
-  launcher + Ratcom + RNode slots with a shared data partition.
-
-## License
-
-GNU Affero General Public License v3.0 or later for Ratcom. The bundled RNode
-firmware is GPL-3.0. See [LICENSE](LICENSE), [docs/LICENSING.md](docs/LICENSING.md),
-and component notices.
-
-Vendored third-party code keeps its own license notices, including
-`lib/Crypto` under MIT. Radio-driver excerpts attributed in source remain under
-their original MIT notice.
+Ratcom uses a [custom fork](https://github.com/ratspeak/microReticulum) of microReticulum, which was originally written by [Chad Atterman](https://github.com/attermann).
