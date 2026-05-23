@@ -8,7 +8,7 @@ on:
     branches: [main]
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ARDUINO_CLI_VERSION: 1.4.1
 
 jobs:
   package:
@@ -21,8 +21,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+      - name: Install Arduino CLI
+        run: |
+          mkdir -p "$RUNNER_TEMP/arduino-cli"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$RUNNER_TEMP/arduino-cli" sh -s "$ARDUINO_CLI_VERSION"
+          echo "$RUNNER_TEMP/arduino-cli" >> "$GITHUB_PATH"
 
       - name: Install Python tools
         run: pip install platformio esptool
@@ -34,7 +38,7 @@ jobs:
         run: make package
 
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rscardputer-firmware
           path: dist/*
@@ -53,8 +57,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+      - name: Install Arduino CLI
+        run: |
+          mkdir -p "$RUNNER_TEMP/arduino-cli"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$RUNNER_TEMP/arduino-cli" sh -s "$ARDUINO_CLI_VERSION"
+          echo "$RUNNER_TEMP/arduino-cli" >> "$GITHUB_PATH"
 
       - name: Install Python tools
         run: pip install platformio esptool
