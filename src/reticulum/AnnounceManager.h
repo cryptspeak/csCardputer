@@ -95,7 +95,7 @@ private:
     unsigned long _globalAnnounceWindowStart = 0;
     unsigned int _globalAnnounceCount = 0;
     static constexpr unsigned int MAX_GLOBAL_ANNOUNCES_PER_SEC = 8;
-    static constexpr int MAX_NODES = RATCOM_MAX_NODES;
+    static constexpr int MAX_NODES = RSCARDPUTER_MAX_NODES;
     static constexpr int MAX_NAME_CACHE = 60;
     static constexpr unsigned long CONTACT_SAVE_INTERVAL_MS = 30000;
     static constexpr unsigned long NAME_CACHE_SAVE_INTERVAL_MS = 5000;

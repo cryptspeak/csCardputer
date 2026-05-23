@@ -17,11 +17,11 @@ constexpr char kPrefsNamespace[] = "rslaunch";
 constexpr char kLastChoiceKey[] = "last";
 
 enum class Choice : uint8_t {
-  Ratcom = 0,
+  Standalone = 0,
   RNode = 1,
 };
 
-Choice selected = Choice::Ratcom;
+Choice selected = Choice::Standalone;
 uint32_t bootStarted = 0;
 uint32_t lastRemain = UINT32_MAX;
 bool booting = false;
@@ -32,12 +32,12 @@ uint8_t choiceValue(Choice choice) {
 }
 
 Choice choiceFromValue(uint8_t value) {
-  return value == 1 ? Choice::RNode : Choice::Ratcom;
+  return value == 1 ? Choice::RNode : Choice::Standalone;
 }
 
 Choice loadLastChoice() {
   Preferences prefs;
-  Choice choice = Choice::Ratcom;
+  Choice choice = Choice::Standalone;
   if (prefs.begin(kPrefsNamespace, true)) {
     choice = choiceFromValue(prefs.getUChar(kLastChoiceKey, choiceValue(choice)));
     prefs.end();
@@ -113,7 +113,7 @@ void drawScreen() {
   d.setCursor(14, 30);
   d.print("Cardputer Adv");
 
-  drawOption(48, "Ratcom", "Standalone messenger", selected == Choice::Ratcom);
+  drawOption(48, "Standalone", "On-device messenger", selected == Choice::Standalone);
   drawOption(87, "RNode", "BLE / USB radio", selected == Choice::RNode);
 
   drawCountdown(true);
@@ -166,7 +166,7 @@ void showError(const char *message) {
 void startChoice(Choice choice) {
   using namespace rs_cardputer_adv;
 
-  FirmwareMode mode = choice == Choice::Ratcom ? FirmwareMode::Ratcom : FirmwareMode::RNode;
+  FirmwareMode mode = choice == Choice::Standalone ? FirmwareMode::Standalone : FirmwareMode::RNode;
   showBooting(mode_name(mode));
   SwitchResult result = set_next_boot(mode);
   if (!result.ok) {
@@ -186,7 +186,7 @@ void handleKey(const Keyboard_Class::KeysState &status) {
 
   for (char key : status.word) {
     if (key == ';' || key == ',' || key == 'w' || key == 'W') {
-      selectChoice(Choice::Ratcom);
+      selectChoice(Choice::Standalone);
       return;
     }
     if (key == '.' || key == '/' || key == 's' || key == 'S') {
@@ -194,7 +194,7 @@ void handleKey(const Keyboard_Class::KeysState &status) {
       return;
     }
     if (key == 'r' || key == 'R') {
-      startChoice(Choice::Ratcom);
+      startChoice(Choice::Standalone);
       return;
     }
     if (key == 'n' || key == 'N') {

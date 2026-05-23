@@ -1,5 +1,5 @@
 // =============================================================================
-// RatCom v1.9.2 — Main Entry Point
+// rsCardputer Standalone — Main Entry Point
 // C1-C7: Radio, Keyboard, Display, Reticulum, Nodes, WiFi, LXMF
 // =============================================================================
 
@@ -360,7 +360,7 @@ void onHotkeyRssiMonitor() {
 void onHotkeyRadioTest() {
     Serial.println("[TEST] Sending raw radio test packet...");
     uint8_t header = 0xA0;
-    const char* testPayload = "RATCOM_TEST_1234567890";
+    const char* testPayload = "RSCARDPUTER_TEST_1234567890";
     size_t totalLen = 1 + strlen(testPayload);
 
     radio.beginPacket();
@@ -567,7 +567,7 @@ static bool selectDiagnosticPeer(const char* explicitArg, RNS::Bytes& destHash, 
 }
 
 static std::string makeDiagnosticLxmfPayload(size_t length) {
-    static constexpr char kPrefix[] = "RATCOM-LXMF-TEST:";
+    static constexpr char kPrefix[] = "RSCARDPUTER-LXMF-TEST:";
     static constexpr char kPattern[] =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -742,7 +742,7 @@ void setup() {
 
     Serial.println();
     Serial.println("=================================");
-    Serial.printf("  RatCom v%s\n", RATCOM_VERSION_STRING);
+    Serial.printf("  rsCardputer Standalone v%s\n", RSCARDPUTER_VERSION_STRING);
     Serial.println("  M5Stack Cardputer Adv");
     Serial.println("=================================");
 
@@ -1090,7 +1090,7 @@ void setup() {
             ui.markAllDirty();
             ui.render();
             ui.flush();
-            sdStore.wipeRatcom();
+            sdStore.wipeStandalone();
             if (announceManager) announceManager->clearAll();
             Serial.println("[BOOT] Old data cleared");
             dataCleanScreen.setStatus("Done! Rebooting...");
@@ -1211,7 +1211,7 @@ void setup() {
     lastStatusUpdate = now;
     loopCycleStart = now;
 
-    Serial.println("[BOOT] RatCom ready");
+    Serial.println("[BOOT] rsCardputer Standalone ready");
 }
 
 // =============================================================================

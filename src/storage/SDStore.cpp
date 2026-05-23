@@ -221,7 +221,7 @@ String SDStore::readString(const char* path) {
     return result;
 }
 
-bool SDStore::wipeRatcom() {
+bool SDStore::wipeStandalone() {
     if (!_ready) return false;
     SharedSPILock lock;
     if (!lock.locked()) return false;
@@ -232,7 +232,7 @@ bool SDStore::wipeRatcom() {
     wipeDir("/ratcom/config");
     SD.rmdir("/ratcom");
     Serial.println("[SD] Wipe complete, recreating dirs...");
-    return formatForRatcom();
+    return formatForStandalone();
 }
 
 void SDStore::wipeDir(const char* path) {
@@ -271,12 +271,12 @@ bool SDStore::hasExistingData() {
     return false;
 }
 
-bool SDStore::formatForRatcom() {
+bool SDStore::formatForStandalone() {
     if (!_ready) return false;
     SharedSPILock lock;
     if (!lock.locked()) return false;
 
-    Serial.println("[SD] Creating RatCom directory structure...");
+    Serial.println("[SD] Creating Standalone directory structure...");
     bool ok = true;
     ok &= ensureDir("/ratcom");
     ok &= ensureDir("/ratcom/config");

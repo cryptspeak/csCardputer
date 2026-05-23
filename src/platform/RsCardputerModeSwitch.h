@@ -8,7 +8,7 @@ namespace rs_cardputer_adv {
 
 enum class FirmwareMode : uint8_t {
     Launcher,
-    Ratcom,
+    Standalone,
     RNode,
 };
 
@@ -21,7 +21,7 @@ inline esp_partition_subtype_t modeSubtype(FirmwareMode mode) {
     switch (mode) {
         case FirmwareMode::Launcher:
             return ESP_PARTITION_SUBTYPE_APP_OTA_0;
-        case FirmwareMode::Ratcom:
+        case FirmwareMode::Standalone:
             return ESP_PARTITION_SUBTYPE_APP_OTA_1;
         case FirmwareMode::RNode:
             return ESP_PARTITION_SUBTYPE_APP_OTA_2;
@@ -37,8 +37,8 @@ inline const char* modeName(FirmwareMode mode) {
     switch (mode) {
         case FirmwareMode::Launcher:
             return "Launcher";
-        case FirmwareMode::Ratcom:
-            return "Ratcom";
+        case FirmwareMode::Standalone:
+            return "Standalone";
         case FirmwareMode::RNode:
             return "RNode";
     }

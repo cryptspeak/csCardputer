@@ -28,11 +28,11 @@ public:
     uint64_t totalBytes() const;
     uint64_t usedBytes() const;
 
-    // Creates /ratcom/config/ directory tree (does NOT reformat FAT)
-    bool formatForRatcom();
+    // Creates the legacy /ratcom/ directory tree (does NOT reformat FAT)
+    bool formatForStandalone();
 
-    // Recursively delete /ratcom/* and recreate clean dirs
-    bool wipeRatcom();
+    // Recursively delete the legacy /ratcom/* data and recreate clean dirs
+    bool wipeStandalone();
 
     // Check if SD has data from a previous install
     bool hasExistingData();

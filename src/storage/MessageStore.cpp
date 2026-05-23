@@ -53,7 +53,7 @@ bool MessageStore::begin(FlashStore* flash, SDStore* sd) {
 }
 
 int MessageStore::messageLimit() const {
-    return (_sd && _sd->isReady()) ? RATCOM_MSG_LIMIT_SD : RATCOM_MSG_LIMIT_FLASH;
+    return (_sd && _sd->isReady()) ? RSCARDPUTER_MSG_LIMIT_SD : RSCARDPUTER_MSG_LIMIT_FLASH;
 }
 
 void MessageStore::countTotalMessages() {

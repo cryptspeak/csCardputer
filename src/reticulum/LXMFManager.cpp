@@ -32,7 +32,7 @@ bool LXMFManager::begin(ReticulumManager* rns, MessageStore* store) {
         }
         std::vector<LXMFMessage> pending = _store->loadPendingOutgoing();
         for (auto& msg : pending) {
-            if ((int)_outQueue.size() >= RATCOM_MAX_OUTQUEUE) break;
+            if ((int)_outQueue.size() >= RSCARDPUTER_MAX_OUTQUEUE) break;
             msg.lastRetryMs = 0;
             _outQueue.push_back(msg);
         }
@@ -145,7 +145,7 @@ bool LXMFManager::sendMessage(const RNS::Bytes& destHash, const std::string& con
     msg.incoming = false;
     msg.status = LXMFStatus::QUEUED;
 
-    if ((int)_outQueue.size() >= RATCOM_MAX_OUTQUEUE) {
+    if ((int)_outQueue.size() >= RSCARDPUTER_MAX_OUTQUEUE) {
         Serial.printf("[LXMF] Outgoing queue full (%d), refusing new message\n",
                       (int)_outQueue.size());
         return false;
@@ -567,7 +567,7 @@ void LXMFManager::handleProofTimeoutHash(const std::string& receiptHash) {
     _pendingProofs.erase(it);
 
     pending.proofAttempts++;
-    bool retry = pending.proofAttempts < 3 && (int)_instance->_outQueue.size() < RATCOM_MAX_OUTQUEUE;
+    bool retry = pending.proofAttempts < 3 && (int)_instance->_outQueue.size() < RSCARDPUTER_MAX_OUTQUEUE;
     LXMFStatus nextStatus = retry ? LXMFStatus::QUEUED : LXMFStatus::FAILED;
 
     if (_instance->_store) {

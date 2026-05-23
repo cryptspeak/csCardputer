@@ -3,7 +3,7 @@
 #include <M5GFX.h>
 
 // =============================================================================
-// RatCom — compact field-console theme
+// rsCardputer — compact field-console theme
 // =============================================================================
 
 namespace Theme {

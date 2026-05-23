@@ -228,7 +228,7 @@ void SettingsScreen::buildSDCardMenu() {
         snprintf(buf, sizeof(buf), "Free: %llu MB", free / (1024 * 1024));
         _list.addItem(buf);
 
-        _list.addItem("Initialize for RatCom");
+        _list.addItem("Initialize Standalone");
         _list.addItem("Wipe All Data", Theme::ERROR);
     } else {
         _list.addItem("Status: NOT INSERTED");
@@ -243,7 +243,7 @@ void SettingsScreen::sdCardFormat() {
         return;
     }
 
-    if (_sdStore->formatForRatcom()) {
+    if (_sdStore->formatForStandalone()) {
         showToast("SD initialized!");
     } else {
         showToast("Init failed");
@@ -625,7 +625,7 @@ void SettingsScreen::renderAbout(M5Canvas& canvas) {
     Theme::useSmallFont(canvas);
     int y = y0 + headerH + 5;
     canvas.setTextColor(Theme::PRIMARY);
-    canvas.drawString("RatCom v" RATCOM_VERSION_STRING, 4, y); y += 10;
+    canvas.drawString("rsCardputer v" RSCARDPUTER_VERSION_STRING, 4, y); y += 10;
 
     canvas.setTextColor(Theme::SECONDARY);
     canvas.drawString("M5Stack Cardputer Adv", 4, y); y += 10;
@@ -659,7 +659,7 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                 factoryReset();
             } else {
                 if (_sdStore && _sdStore->isReady()) {
-                    if (_sdStore->wipeRatcom()) {
+                    if (_sdStore->wipeStandalone()) {
                         showToast("SD wiped!");
                     } else {
                         showToast("Wipe failed");
@@ -989,9 +989,9 @@ void SettingsScreen::factoryReset() {
         Serial.println("[RESET] NVS cleared");
     }
 
-    // 2. Wipe SD card ratcom directory
+    // 2. Wipe legacy /ratcom SD card directory
     if (_sdStore && _sdStore->isReady()) {
-        _sdStore->wipeRatcom();
+        _sdStore->wipeStandalone();
         Serial.println("[RESET] SD wiped");
     }
 

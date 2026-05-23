@@ -10,4 +10,4 @@ __pycache__
 *.pyc
 .DS_Store
 dist/
-rscardputer-ratcom-factory.bin
+rscardputer-standalone-factory.bin

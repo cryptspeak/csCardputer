@@ -6,7 +6,7 @@ Usage:
     python3 validate_announce.py <hex-encoded-raw-packet>
 
 The hex string is the full Reticulum packet (flags + hops + dest_hash + context + data),
-as printed by the [ANN-WIRE] log line from Ratcom's serial output.
+as printed by the [ANN-WIRE] log line from Standalone mode's serial output.
 
 This script does NOT require a running Reticulum instance. It uses the pure Python
 Ed25519/SHA-256 implementations directly from the reference codebase.

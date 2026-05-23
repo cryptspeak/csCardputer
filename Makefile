@@ -1,4 +1,4 @@
-RATCOM_ENV ?= ratcom_915
+STANDALONE_ENV ?= standalone_915
 RNODE_DIR ?= vendor/rnode_firmware
 LAUNCHER_DIR ?= launcher
 BUILD_DIR ?= build
@@ -8,25 +8,25 @@ PARTITION_CSV := partitions/rs_cardputer_adv_8mb_dual.csv
 PARTITIONS_BIN := $(BUILD_DIR)/rs_cardputer_adv_partitions.bin
 
 FULL_NAME := rscardputer-full
-RATCOM_ONLY_NAME := rscardputer-ratcom
+STANDALONE_NAME := rscardputer-standalone
 RNODE_ONLY_NAME := rscardputer-rnode
-M5LAUNCHER_RATCOM_NAME := rscardputer-ratcom-m5launcher
+M5LAUNCHER_STANDALONE_NAME := rscardputer-standalone-m5launcher
 M5LAUNCHER_RNODE_NAME := rscardputer-rnode-m5launcher
 
 FULL_BIN := $(BUILD_DIR)/$(FULL_NAME).bin
-RATCOM_ONLY_BIN := $(BUILD_DIR)/$(RATCOM_ONLY_NAME).bin
+STANDALONE_BIN := $(BUILD_DIR)/$(STANDALONE_NAME).bin
 RNODE_ONLY_BIN := $(BUILD_DIR)/$(RNODE_ONLY_NAME).bin
 
 LAUNCHER_BIN := $(LAUNCHER_DIR)/.pio/build/cardputer_adv_launcher/firmware.bin
-RATCOM_BIN := .pio/build/$(RATCOM_ENV)/firmware.bin
-RATCOM_MERGED_BIN := rscardputer-ratcom-factory.bin
+STANDALONE_APP_BIN := .pio/build/$(STANDALONE_ENV)/firmware.bin
+STANDALONE_FACTORY_BIN := rscardputer-standalone-factory.bin
 
 RNODE_OUTPUT := $(RNODE_DIR)/build/esp32.esp32.esp32s3
 RNODE_BIN := $(RNODE_OUTPUT)/RNode_Firmware.ino.bin
 RNODE_BOOTLOADER_BIN := $(RNODE_OUTPUT)/RNode_Firmware.ino.bootloader.bin
 RNODE_PARTITIONS_BIN := $(RNODE_OUTPUT)/RNode_Firmware.ino.partitions.bin
 
-BOOTLOADER_BIN := .pio/build/$(RATCOM_ENV)/bootloader.bin
+BOOTLOADER_BIN := .pio/build/$(STANDALONE_ENV)/bootloader.bin
 PLATFORMIO_ARDUINO ?= $(HOME)/.platformio/packages/framework-arduinoespressif32
 ARDUINO15_ESP32 ?= $(HOME)/Library/Arduino15/packages/esp32/hardware/esp32/2.0.17
 GEN_ESPPART ?= $(if $(wildcard $(PLATFORMIO_ARDUINO)/tools/gen_esp32part.py),$(PLATFORMIO_ARDUINO)/tools/gen_esp32part.py,$(ARDUINO15_ESP32)/tools/gen_esp32part.py)
@@ -37,7 +37,7 @@ ifeq ($(PORT),)
 PORT := /dev/ttyACM0
 endif
 
-.PHONY: all build prep-cardputer_adv build-ratcom build-launcher build-rnode check bundle full-image ratcom-only-image rnode-only-image package release flash clean
+.PHONY: all build prep-cardputer_adv build-standalone build-launcher build-rnode check bundle full-image standalone-image rnode-only-image package release flash clean
 
 all: bundle
 
@@ -46,8 +46,8 @@ build: package
 prep-cardputer_adv:
 	$(MAKE) -C $(RNODE_DIR) prep-cardputer_adv
 
-build-ratcom:
-	python3 -m platformio run -e $(RATCOM_ENV)
+build-standalone:
+	python3 -m platformio run -e $(STANDALONE_ENV)
 
 build-launcher:
 	python3 -m platformio run -d $(LAUNCHER_DIR) -e cardputer_adv_launcher
@@ -59,8 +59,8 @@ $(PARTITIONS_BIN): $(PARTITION_CSV)
 	mkdir -p $(BUILD_DIR)
 	python3 $(GEN_ESPPART) $(PARTITION_CSV) $(PARTITIONS_BIN)
 
-check: build-launcher build-ratcom build-rnode
-	python3 tools/check_image_fit.py --launcher $(LAUNCHER_BIN) --ratcom $(RATCOM_BIN) --rnode $(RNODE_BIN)
+check: build-launcher build-standalone build-rnode
+	python3 tools/check_image_fit.py --launcher $(LAUNCHER_BIN) --standalone $(STANDALONE_APP_BIN) --rnode $(RNODE_BIN)
 
 full-image: check $(PARTITIONS_BIN)
 	python3 tools/make_dual_image.py \
@@ -68,13 +68,13 @@ full-image: check $(PARTITIONS_BIN)
 		--partitions $(PARTITIONS_BIN) \
 		--boot-app0 $(BOOT_APP0_BIN) \
 		--launcher $(LAUNCHER_BIN) \
-		--ratcom $(RATCOM_BIN) \
+		--standalone $(STANDALONE_APP_BIN) \
 		--rnode $(RNODE_BIN) \
 		--output $(FULL_BIN)
 
-ratcom-only-image: build-ratcom
+standalone-image: build-standalone
 	mkdir -p $(BUILD_DIR)
-	cp $(RATCOM_MERGED_BIN) $(RATCOM_ONLY_BIN)
+	cp $(STANDALONE_FACTORY_BIN) $(STANDALONE_BIN)
 
 rnode-only-image: build-rnode
 	mkdir -p $(BUILD_DIR)
@@ -88,12 +88,12 @@ rnode-only-image: build-rnode
 
 bundle: full-image
 
-package: full-image ratcom-only-image rnode-only-image
+package: full-image standalone-image rnode-only-image
 	mkdir -p $(DIST_DIR)
 	python3 tools/package_merged_zip.py --image $(FULL_BIN) --name $(FULL_NAME) --output $(DIST_DIR)/$(FULL_NAME).zip
-	python3 tools/package_merged_zip.py --image $(RATCOM_ONLY_BIN) --name $(RATCOM_ONLY_NAME) --output $(DIST_DIR)/$(RATCOM_ONLY_NAME).zip
+	python3 tools/package_merged_zip.py --image $(STANDALONE_BIN) --name $(STANDALONE_NAME) --output $(DIST_DIR)/$(STANDALONE_NAME).zip
 	python3 tools/package_merged_zip.py --image $(RNODE_ONLY_BIN) --name $(RNODE_ONLY_NAME) --output $(DIST_DIR)/$(RNODE_ONLY_NAME).zip
-	cp $(RATCOM_BIN) $(DIST_DIR)/$(M5LAUNCHER_RATCOM_NAME).bin
+	cp $(STANDALONE_APP_BIN) $(DIST_DIR)/$(M5LAUNCHER_STANDALONE_NAME).bin
 	cp $(RNODE_BIN) $(DIST_DIR)/$(M5LAUNCHER_RNODE_NAME).bin
 
 release: package
@@ -102,4 +102,4 @@ flash: bundle
 	python3 -m esptool --chip esp32s3 --port $(PORT) --baud 460800 --before default_reset --after hard_reset write-flash 0x0 $(FULL_BIN)
 
 clean:
-	rm -rf $(BUILD_DIR) $(DIST_DIR) $(RATCOM_MERGED_BIN)
+	rm -rf $(BUILD_DIR) $(DIST_DIR) $(STANDALONE_FACTORY_BIN)

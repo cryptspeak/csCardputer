@@ -56,7 +56,7 @@ public:
     int totalMessageCount() const { return _totalMessageCount; }
     int messageLimit() const;
     bool isFull() const { return _totalMessageCount >= messageLimit(); }
-    bool isNearFull() const { return _totalMessageCount >= messageLimit() * RATCOM_MSG_WARN_PCT / 100; }
+    bool isNearFull() const { return _totalMessageCount >= messageLimit() * RSCARDPUTER_MSG_WARN_PCT / 100; }
     int remainingCapacity() const { return std::max(0, messageLimit() - _totalMessageCount); }
 
 private:

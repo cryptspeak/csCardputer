@@ -7,10 +7,10 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
-// RatCom BLE service UUID (custom)
-#define RATCOM_SERVICE_UUID    "a7f3c8e2-0001-4b6d-9f12-4a7e3d5c8b01"
-#define RATCOM_RX_CHAR_UUID    "a7f3c8e2-0002-4b6d-9f12-4a7e3d5c8b01"
-#define RATCOM_TX_CHAR_UUID    "a7f3c8e2-0003-4b6d-9f12-4a7e3d5c8b01"
+// Standalone BLE service UUID (custom)
+#define RSCARDPUTER_SERVICE_UUID    "a7f3c8e2-0001-4b6d-9f12-4a7e3d5c8b01"
+#define RSCARDPUTER_RX_CHAR_UUID    "a7f3c8e2-0002-4b6d-9f12-4a7e3d5c8b01"
+#define RSCARDPUTER_TX_CHAR_UUID    "a7f3c8e2-0003-4b6d-9f12-4a7e3d5c8b01"
 
 static BLEServer* bleServer = nullptr;
 static BLECharacteristic* txChar = nullptr;
@@ -27,23 +27,23 @@ class StubServerCallbacks : public BLEServerCallbacks {
 };
 
 bool BLEStub::begin() {
-    BLEDevice::init("RatCom");
+    BLEDevice::init("rsCardputer");
     bleServer = BLEDevice::createServer();
     bleServer->setCallbacks(new StubServerCallbacks());
 
     // Create GATT service
-    BLEService* service = bleServer->createService(RATCOM_SERVICE_UUID);
+    BLEService* service = bleServer->createService(RSCARDPUTER_SERVICE_UUID);
 
     // RX characteristic (write from client)
     BLECharacteristic* rxChar = service->createCharacteristic(
-        RATCOM_RX_CHAR_UUID,
+        RSCARDPUTER_RX_CHAR_UUID,
         BLECharacteristic::PROPERTY_WRITE
     );
-    rxChar->setValue("RatCom v" RATCOM_VERSION_STRING " — BLE stub");
+    rxChar->setValue("rsCardputer v" RSCARDPUTER_VERSION_STRING " - BLE stub");
 
     // TX characteristic (notify to client)
     txChar = service->createCharacteristic(
-        RATCOM_TX_CHAR_UUID,
+        RSCARDPUTER_TX_CHAR_UUID,
         BLECharacteristic::PROPERTY_NOTIFY
     );
     txChar->addDescriptor(new BLE2902());
@@ -52,7 +52,7 @@ bool BLEStub::begin() {
 
     // Start advertising
     BLEAdvertising* advertising = BLEDevice::getAdvertising();
-    advertising->addServiceUUID(RATCOM_SERVICE_UUID);
+    advertising->addServiceUUID(RSCARDPUTER_SERVICE_UUID);
     advertising->setScanResponse(true);
     advertising->setMinPreferred(0x06);
     advertising->start();

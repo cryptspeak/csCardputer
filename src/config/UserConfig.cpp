@@ -2,7 +2,8 @@
 #include "config/BoardConfig.h"
 #include <Preferences.h>
 
-// NVS namespace and key for full config backup
+// Legacy NVS namespace and key for full config backup.
+// TODO: Rename only with explicit NVS migration handling.
 static constexpr const char* NVS_NS   = "ratcom_cfg";
 static constexpr const char* NVS_KEY  = "json";
 

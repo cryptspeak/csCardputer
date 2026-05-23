@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a merged Cardputer Adv image with launcher, Ratcom, and RNode."""
+"""Build a merged Cardputer Adv image with launcher, Standalone, and RNode."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 LAUNCHER_OFFSET = "0x10000"
-RATCOM_OFFSET = "0x110000"
+STANDALONE_OFFSET = "0x110000"
 RNODE_OFFSET = "0x370000"
 
 
@@ -37,7 +37,7 @@ def main() -> int:
     parser.add_argument("--partitions", required=True, type=Path)
     parser.add_argument("--boot-app0", required=True, type=Path)
     parser.add_argument("--launcher", required=True, type=Path)
-    parser.add_argument("--ratcom", required=True, type=Path)
+    parser.add_argument("--standalone", required=True, type=Path)
     parser.add_argument("--rnode", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--launcher-slot-size", default="0x100000", type=parse_int)
@@ -49,13 +49,13 @@ def main() -> int:
         ("partition table", args.partitions),
         ("boot_app0", args.boot_app0),
         ("launcher app", args.launcher),
-        ("Ratcom app", args.ratcom),
+        ("Standalone app", args.standalone),
         ("RNode app", args.rnode),
     ):
         require_file(path, label)
 
     check_slot(args.launcher, "Launcher", args.launcher_slot_size)
-    check_slot(args.ratcom, "Ratcom", args.app_slot_size)
+    check_slot(args.standalone, "Standalone", args.app_slot_size)
     check_slot(args.rnode, "RNode", args.app_slot_size)
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -80,8 +80,8 @@ def main() -> int:
         str(args.boot_app0),
         LAUNCHER_OFFSET,
         str(args.launcher),
-        RATCOM_OFFSET,
-        str(args.ratcom),
+        STANDALONE_OFFSET,
+        str(args.standalone),
         RNODE_OFFSET,
         str(args.rnode),
     ]

@@ -73,9 +73,9 @@ jobs:
 
           artifacts=(
             dist/rscardputer-full.zip
-            dist/rscardputer-ratcom.zip
+            dist/rscardputer-standalone.zip
             dist/rscardputer-rnode.zip
-            dist/rscardputer-ratcom-m5launcher.bin
+            dist/rscardputer-standalone-m5launcher.bin
             dist/rscardputer-rnode-m5launcher.bin
           )
 

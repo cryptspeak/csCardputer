@@ -263,7 +263,7 @@ bool ReticulumManager::begin(SX1262* radio, FlashStore* flash) {
         } else if (now < 60000) {
             maxRate = 2;  // Boot flood
         } else {
-            maxRate = RATCOM_MAX_ANNOUNCES_PER_SEC;
+            maxRate = RSCARDPUTER_MAX_ANNOUNCES_PER_SEC;
         }
         if (++count > maxRate) return false;
 
