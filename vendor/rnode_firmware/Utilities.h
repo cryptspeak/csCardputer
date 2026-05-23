@@ -1914,18 +1914,23 @@ bool eeprom_have_conf() {
     }
   }
 
-  void cardputer_adv_self_provision() {
-    bool info_valid = eeprom_lock_set() &&
-      eeprom_product_valid() &&
-      eeprom_model_valid() &&
+  bool cardputer_adv_info_valid() {
+    return eeprom_lock_set() &&
+      cardputer_adv_eeprom_read(ADDR_PRODUCT) == PRODUCT_CARDPUTER_ADV &&
+      cardputer_adv_eeprom_read(ADDR_MODEL) == MODEL_EC &&
       eeprom_hwrev_valid() &&
       eeprom_checksum_valid();
+  }
+
+  void cardputer_adv_self_provision() {
+    bool info_valid = cardputer_adv_info_valid();
 
     if (!info_valid) {
       cardputer_adv_write_info();
+      cardputer_adv_write_default_conf();
     }
 
-    if (!eeprom_have_conf()) {
+    if (info_valid && !eeprom_have_conf()) {
       cardputer_adv_write_default_conf();
     }
 

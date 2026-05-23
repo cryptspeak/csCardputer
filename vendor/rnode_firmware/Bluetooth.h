@@ -56,6 +56,19 @@ char bt_da[BT_DEV_ADDR_LEN];
 char bt_dh[BT_DEV_HASH_LEN];
 char bt_devname[11];
 
+#if BOARD_MODEL == BOARD_CARDPUTER_ADV
+  extern void stopRadio();
+
+  void cardputer_adv_ble_host_detached() {
+    if (radio_online) stopRadio();
+    cable_state   = CABLE_STATE_DISCONNECTED;
+    current_rssi  = -292;
+    last_rssi     = -292;
+    last_rssi_raw = 0x00;
+    last_snr_raw  = 0x80;
+  }
+#endif
+
 #if MCU_VARIANT == MCU_ESP32
   #if HAS_BLUETOOTH == true
 
@@ -319,6 +332,9 @@ char bt_devname[11];
       display_unblank();
       ble_authenticated = false;
       bt_state = BT_STATE_ON;
+      #if BOARD_MODEL == BOARD_CARDPUTER_ADV
+        cardputer_adv_ble_host_detached();
+      #endif
     }
 
     bool bt_setup_hw() {
