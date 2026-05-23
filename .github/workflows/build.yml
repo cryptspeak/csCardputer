@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   package:
     runs-on: ubuntu-latest
@@ -65,6 +68,8 @@ jobs:
       - name: Create Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           release_args=(--generate-notes)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
@@ -79,8 +84,8 @@ jobs:
             dist/rscardputer-rnode-m5launcher.bin
           )
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${artifacts[@]}" --clobber
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${artifacts[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$GITHUB_REF_NAME" "${artifacts[@]}" "${release_args[@]}"
+            gh release create "$GITHUB_REF_NAME" "${artifacts[@]}" "${release_args[@]}" --repo "$GITHUB_REPOSITORY"
           fi
