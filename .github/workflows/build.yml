@@ -75,6 +75,8 @@ jobs:
             dist/rscardputer-full.zip
             dist/rscardputer-ratcom.zip
             dist/rscardputer-rnode.zip
+            dist/rscardputer-ratcom-m5launcher.bin
+            dist/rscardputer-rnode-m5launcher.bin
           )
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

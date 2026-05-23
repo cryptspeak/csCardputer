@@ -157,11 +157,17 @@ Release artifacts are written to `dist/`:
 dist/rscardputer-full.zip
 dist/rscardputer-ratcom.zip
 dist/rscardputer-rnode.zip
+dist/rscardputer-ratcom-m5launcher.bin
+dist/rscardputer-rnode-m5launcher.bin
 ```
 
 Use the `.zip` files with the Ratspeak web flasher. Each zip contains a merged
 factory image and the web-flasher manifest for the Cardputer Adv. Raw `.bin`
-files are internal build outputs under `build/` and are not release artifacts.
+files under `build/` are internal build outputs.
+
+The `*-m5launcher.bin` files are app images for M5Launcher users who already
+boot through bmorcelli's Launcher and want to start Ratcom or RNode directly
+from SD, without using the bundled rsCardputer launcher.
 
 Flash the bundled launcher image with:
 

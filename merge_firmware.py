@@ -1,5 +1,5 @@
 """Post-build script: merge bootloader + partitions + boot_app0 + firmware
-into a single .bin for M5Burner and one-step flashing."""
+into a single .bin for one-step flashing and web-flasher packaging."""
 
 Import("env")
 
@@ -15,7 +15,7 @@ def merge_bin(source, target, env):
     framework_dir = env.PioPlatform().get_package_dir("framework-arduinoespressif32")
     boot_app0 = os.path.join(framework_dir, "tools", "partitions", "boot_app0.bin")
 
-    output = os.path.join(project_dir, "ratcom-merged.bin")
+    output = os.path.join(project_dir, "rscardputer-ratcom-factory.bin")
 
     python = env.subst("$PYTHONEXE")
     env.Execute(

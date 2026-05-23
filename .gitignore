@@ -10,6 +10,4 @@ __pycache__
 *.pyc
 .DS_Store
 dist/
-ratcom-firmware/
-ratcom-firmware.zip
-ratcom-merged.bin
+rscardputer-ratcom-factory.bin
