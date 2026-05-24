@@ -287,6 +287,11 @@ void setup() {
     #if HAS_BLUETOOTH || HAS_BLE == true
       bt_init();
       bt_init_ran = true;
+      #if BOARD_MODEL == BOARD_CARDPUTER_ADV && HAS_BLE == true
+        if (!console_active && bt_ready && bt_enabled && bt_state != BT_STATE_OFF && bt_bond_count() == 0) {
+          bt_enable_pairing_on_request();
+        }
+      #endif
     #endif
 
     if (console_active) {

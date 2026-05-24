@@ -42,7 +42,7 @@
 #endif
 
 #if BOARD_MODEL == BOARD_CARDPUTER_ADV
-  #define BT_PAIRING_TIMEOUT 30000
+  #define BT_PAIRING_TIMEOUT 90000
 #else
   #define BT_PAIRING_TIMEOUT 35000
 #endif
@@ -228,13 +228,19 @@ char bt_devname[11];
     void bt_debond_all() {
       // Serial.println("Debonding all");
       int dev_num = esp_ble_get_bond_device_num();
+      if (dev_num <= 0) return;
       esp_ble_bond_dev_t *dev_list = (esp_ble_bond_dev_t *)malloc(sizeof(esp_ble_bond_dev_t) * dev_num);
+      if (dev_list == NULL) return;
       esp_ble_get_bond_device_list(&dev_num, dev_list);
       for (int i = 0; i < dev_num; i++) { esp_ble_remove_bond_device(dev_list[i].bd_addr); }
       free(dev_list);
     }
 
-    void bt_enable_pairing() {
+    int bt_bond_count() {
+      return esp_ble_get_bond_device_num();
+    }
+
+    void bt_enable_pairing(bool show_pin) {
       // Serial.println("BT enable pairing");
       display_unblank();
       if (bt_state == BT_STATE_OFF) bt_start();
@@ -244,7 +250,15 @@ char bt_devname[11];
       bt_allow_pairing = true;
       bt_pairing_started = millis();
       bt_state = BT_STATE_PAIRING;
-      bt_ssp_pin = pairing_pin;
+      bt_ssp_pin = show_pin ? pairing_pin : 0;
+    }
+
+    void bt_enable_pairing() {
+      bt_enable_pairing(true);
+    }
+
+    void bt_enable_pairing_on_request() {
+      bt_enable_pairing(false);
     }
 
     void bt_disable_pairing() {
