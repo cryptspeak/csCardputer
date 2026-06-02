@@ -2,9 +2,44 @@
 #include "config/Config.h"
 #include "hal/SharedSPIBus.h"
 // All LittleFS access goes through FlashStore (mutex-protected)
+#include "storage/MessageEncryption.h"
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <algorithm>
+
+namespace {
+// Wraps a JSON String in the at-rest envelope when an identity is
+// available. Returns the encrypted blob bytes (still in a String because
+// the downstream WriteQueue/FlashStore APIs are String-based).
+String maybeEncrypt(const RNS::Identity* identity, const String& json) {
+    if (!identity || !*identity) return json;
+    String envelope;
+    if (MessageEncryption::encryptString(*identity, json, envelope)) {
+        return envelope;
+    }
+    Serial.println("[MSGSTORE] encrypt failed — writing plaintext fallback");
+    return json;
+}
+
+// Inverse of maybeEncrypt. Transparently passes through legacy plaintext
+// files (no magic header) so migration can be incremental.
+String maybeDecrypt(const RNS::Identity* identity, const String& raw) {
+    if (raw.length() == 0) return raw;
+    const uint8_t* data = (const uint8_t*)raw.c_str();
+    size_t len = raw.length();
+    if (!MessageEncryption::isEncrypted(data, len)) return raw;  // legacy
+    if (!identity || !*identity) {
+        Serial.println("[MSGSTORE] encrypted file but no identity — cannot decrypt");
+        return "";
+    }
+    String out;
+    if (!MessageEncryption::decryptOrPassthrough(*identity, raw, out)) {
+        Serial.println("[MSGSTORE] decrypt failed (wrong identity or tampered)");
+        return "";
+    }
+    return out;
+}
+}  // namespace
 
 bool MessageStore::begin(FlashStore* flash, SDStore* sd) {
     _flash = flash;
@@ -431,6 +466,11 @@ bool MessageStore::saveMessage(LXMFMessage& msg) {
     String json;
     serializeJson(doc, json);
 
+    // Encrypt at rest if an identity is available. The downstream
+    // WriteQueue/FlashStore treats this as opaque bytes — the magic header
+    // in the envelope lets the load path tell encrypted from legacy files.
+    String payload = maybeEncrypt(_identity, json);
+
     char filename[64];
     snprintf(filename, sizeof(filename), "%013lu_%c.json",
              (unsigned long)counter, msg.incoming ? 'i' : 'o');
@@ -446,9 +486,9 @@ bool MessageStore::saveMessage(LXMFMessage& msg) {
     // Flash is written first in processJob, SD second
     bool enqueued = false;
     if (_sd && _sd->isReady()) {
-        enqueued = _writeQueue.enqueue(sdPath.c_str(), flashPath.c_str(), json, WriteBackend::BOTH);
+        enqueued = _writeQueue.enqueue(sdPath.c_str(), flashPath.c_str(), payload, WriteBackend::BOTH);
     } else {
-        enqueued = _writeQueue.enqueue(nullptr, flashPath.c_str(), json, WriteBackend::FLASH_ONLY);
+        enqueued = _writeQueue.enqueue(nullptr, flashPath.c_str(), payload, WriteBackend::FLASH_ONLY);
     }
     if (!enqueued) {
         _nextReceiveCounter--;
@@ -542,14 +582,19 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
 
     for (int i = startIdx; i < endIdx; i++) {
         String fullPath = sourceDir + "/" + filenames[i];
-        String json;
+        String raw;
 
         if (useSD) {
-            json = _sd->readString(fullPath.c_str());
+            raw = _sd->readString(fullPath.c_str());
         } else {
-            json = _flash->readString(fullPath.c_str());
+            raw = _flash->readString(fullPath.c_str());
         }
 
+        if (raw.length() == 0) continue;
+
+        // Transparent decryption: encrypted file → plaintext JSON; legacy
+        // plaintext file → passed through; decryption failure → skip.
+        String json = maybeDecrypt(_identity, raw);
         if (json.length() == 0) continue;
 
         JsonDocument doc;
@@ -763,7 +808,10 @@ bool MessageStore::updateMessageStatusByCounter(const std::string& peerHex, uint
 
     auto readModifyWrite = [&](auto readFn, auto writeFn, const String& dir) -> bool {
         String path = dir + "/" + filename;
-        String json = readFn(path.c_str());
+        String raw = readFn(path.c_str());
+        if (raw.length() == 0) return false;
+
+        String json = maybeDecrypt(_identity, raw);
         if (json.length() == 0) return false;
 
         JsonDocument doc;
@@ -772,7 +820,8 @@ bool MessageStore::updateMessageStatusByCounter(const std::string& peerHex, uint
 
         String updated;
         serializeJson(doc, updated);
-        return writeFn(path.c_str(), updated);
+        String payload = maybeEncrypt(_identity, updated);
+        return writeFn(path.c_str(), payload);
     };
 
     bool updated = false;
@@ -823,7 +872,10 @@ bool MessageStore::updateMessageStatus(const std::string& peerHex, double timest
         std::sort(candidates.begin(), candidates.end(), [](const String& a, const String& b) { return a > b; });
         for (const auto& fname : candidates) {
             String path = dir + "/" + fname;
-            String json = readFn(path.c_str());
+            String raw = readFn(path.c_str());
+            if (raw.length() == 0) continue;
+
+            String json = maybeDecrypt(_identity, raw);
             if (json.length() == 0) continue;
 
             JsonDocument doc;
@@ -834,7 +886,8 @@ bool MessageStore::updateMessageStatus(const std::string& peerHex, double timest
             doc["status"] = (int)newStatus;
             String updatedJson;
             serializeJson(doc, updatedJson);
-            return writeFn(path.c_str(), updatedJson);
+            String payload = maybeEncrypt(_identity, updatedJson);
+            return writeFn(path.c_str(), payload);
         }
         return false;
     };
@@ -932,6 +985,89 @@ String MessageStore::conversationDir(const std::string& peerHex) const {
 
 String MessageStore::sdConversationDir(const std::string& peerHex) const {
     return String(SD_PATH_MESSAGES) + "/" + peerHex.substr(0, 16).c_str();
+}
+
+int MessageStore::migratePlaintextMessages(MigrationProgressCallback cb) {
+    if (!encryptionEnabled()) {
+        Serial.println("[MSGSTORE] migrate: no identity — nothing to do");
+        return 0;
+    }
+
+    // Collect work list first so we can report progress accurately.
+    // Each entry: {peerHex, full path, useSD}. Re-using existing dir
+    // listing helpers would mix flash/SD scans; iterate explicitly.
+    struct Item {
+        std::string peer;
+        String path;
+        bool useSD;
+    };
+    std::vector<Item> work;
+
+    auto scanDir = [&](const std::string& peerHex,
+                       const String& dir, bool useSD,
+                       auto openDirFn) {
+        File d = openDirFn(dir.c_str());
+        if (!d || !d.isDirectory()) { if (d) d.close(); return; }
+        File entry = d.openNextFile();
+        while (entry) {
+            if (!entry.isDirectory()) {
+                String name = entry.name();
+                if (!name.startsWith(".") && name.endsWith(".json")) {
+                    work.push_back({peerHex, dir + "/" + name, useSD});
+                }
+            }
+            entry.close();
+            entry = d.openNextFile();
+        }
+        d.close();
+    };
+
+    for (const auto& peerHex : _conversations) {
+        if (_sd && _sd->isReady()) {
+            SharedSPILock lock;
+            if (lock.locked()) {
+                scanDir(peerHex, sdConversationDir(peerHex), true,
+                        [this](const char* p) { return _sd->openDir(p); });
+            }
+        }
+        scanDir(peerHex, conversationDir(peerHex), false,
+                [this](const char* p) { return _flash->openDir(p); });
+        yield();
+    }
+
+    int total = (int)work.size();
+    int converted = 0;
+    int idx = 0;
+    for (auto& it : work) {
+        idx++;
+        String raw = it.useSD ? _sd->readString(it.path.c_str())
+                              : _flash->readString(it.path.c_str());
+        if (raw.length() == 0) continue;
+
+        // Skip already-encrypted files.
+        if (MessageEncryption::isEncrypted((const uint8_t*)raw.c_str(), raw.length())) continue;
+
+        String envelope;
+        if (!MessageEncryption::encryptString(*_identity, raw, envelope)) {
+            Serial.printf("[MSGSTORE] migrate: encrypt failed for %s\n", it.path.c_str());
+            continue;
+        }
+
+        bool ok = it.useSD
+            ? _sd->writeString(it.path.c_str(), envelope)
+            : _flash->writeString(it.path.c_str(), envelope);
+        if (!ok) {
+            Serial.printf("[MSGSTORE] migrate: write failed for %s\n", it.path.c_str());
+            continue;
+        }
+        converted++;
+        if (cb) cb(idx, total, it.peer.c_str());
+        // Yield every few files — encryption + flash write is heavy.
+        if ((idx % 8) == 0) yield();
+    }
+
+    Serial.printf("[MSGSTORE] migrate: %d/%d files encrypted\n", converted, total);
+    return converted;
 }
 
 // Trim flash to cache size when SD is the primary store

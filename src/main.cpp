@@ -36,6 +36,8 @@
 #include "ui/screens/DataCleanScreen.h"
 #include "ui/screens/HelpOverlay.h"
 #include "ui/screens/TimezoneScreen.h"
+#include "ui/screens/PasswordScreen.h"
+#include "reticulum/IdentityCrypto.h"
 #include "power/PowerManager.h"
 #include "audio/AudioNotify.h"
 #include "transport/BLEStub.h"
@@ -101,6 +103,8 @@ DataCleanScreen dataCleanScreen;
 SettingsScreen settingsScreen;
 TimezoneScreen timezoneScreen;
 HelpOverlay helpOverlay;
+PasswordScreen passwordScreen;
+MigrationWarningScreen migrationScreen;
 
 // Tab-screen mapping
 Screen* tabScreens[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -731,6 +735,216 @@ static void handleSerialCommands() {
 }
 
 // =============================================================================
+// Boot-time blocking helpers (password / migration prompts)
+// =============================================================================
+//
+// These run BEFORE the main loop() exists, so they can't rely on it for
+// rendering or input. They poll the keyboard directly and call ui.render()
+// every frame. They are intentionally synchronous — the device is not
+// transmitting yet, the radio is in receive mode but Reticulum hasn't
+// started, so blocking here is safe.
+
+static void runBlockingInputLoop(std::function<bool()> doneCheck) {
+    keyboard.setMode(InputMode::TextInput);
+    while (!doneCheck()) {
+        M5.update();
+        keyboard.update();
+        if (keyboard.hasEvent()) {
+            const KeyEvent& evt = keyboard.getEvent();
+            ui.handleKey(evt);
+        }
+        ui.markAllDirty();
+        ui.render();
+        ui.flush();
+        delay(20);
+    }
+    keyboard.setMode(InputMode::Navigation);
+}
+
+// Read the largest identity blob available from any tier. Used to fetch
+// the encrypted envelope for password-attempt unwrapping. Returns true if
+// any tier yielded usable bytes.
+static bool readAnyIdentityBlob(RNS::Bytes& out) {
+    uint8_t buf[512];
+    size_t len = 0;
+    out = RNS::Bytes();
+
+    // Flash
+    if (flash.exists(PATH_IDENTITY)) {
+        if (flash.readFile(PATH_IDENTITY, buf, sizeof(buf), len) && len > 0) {
+            if (IdentityCrypto::isEncrypted(buf, len)) {
+                out = RNS::Bytes(buf, len);
+                return true;
+            }
+        }
+    }
+    // NVS
+    {
+        Preferences prefs;
+        if (prefs.begin("ratcom_id", true)) {
+            size_t nvsLen = prefs.getBytesLength("encid");
+            if (nvsLen > 0 && nvsLen <= sizeof(buf)) {
+                prefs.getBytes("encid", buf, nvsLen);
+                prefs.end();
+                if (IdentityCrypto::isEncrypted(buf, nvsLen)) {
+                    out = RNS::Bytes(buf, nvsLen);
+                    return true;
+                }
+            } else {
+                prefs.end();
+            }
+        }
+    }
+    // SD
+    if (sdStore.isReady() && sdStore.exists(SD_PATH_IDENTITY)) {
+        len = 0;
+        if (sdStore.readFile(SD_PATH_IDENTITY, buf, sizeof(buf), len) && len > 0) {
+            if (IdentityCrypto::isEncrypted(buf, len)) {
+                out = RNS::Bytes(buf, len);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Outcome of the password gate. Carries the verified password (and, for
+// the ENCRYPTED path, the decrypted identity private key) to the caller.
+struct PasswordGateResult {
+    bool ok = false;
+    String password;
+    RNS::Bytes unlockedKey;     // empty for SETUP path; populated for UNLOCK
+    bool legacyDetected = false;
+};
+
+// Drive the password screens until we either obtain a verified password or
+// hit the hard lockout (in which case we halt). On lockout we do NOT
+// proceed to boot — the user must power cycle.
+static PasswordGateResult runPasswordGate(ReticulumManager::IdentityState state) {
+    PasswordGateResult res;
+
+    if (state == ReticulumManager::IdentityState::ENCRYPTED) {
+        RNS::Bytes blob;
+        if (!readAnyIdentityBlob(blob)) {
+            Serial.println("[BOOT] State=ENCRYPTED but no readable blob — bailing");
+            return res;
+        }
+
+        passwordScreen.setMode(PasswordScreen::Mode::UNLOCK);
+        ui.setScreen(&passwordScreen);
+
+        constexpr int MAX_ATTEMPTS = 10;
+        int attempts = 0;
+        bool done = false;
+        String submitted;
+
+        passwordScreen.setSubmitCallback([&](const String& pw) {
+            submitted = pw;
+            done = true;
+        });
+
+        for (;;) {
+            done = false;
+            submitted = "";
+            runBlockingInputLoop([&]() { return done; });
+
+            RNS::Bytes plain;
+            if (IdentityCrypto::unwrap(submitted, blob, plain)) {
+                res.ok = true;
+                res.password = submitted;
+                res.unlockedKey = plain;
+                IdentityCrypto::secureZero((void*)submitted.c_str(), submitted.length());
+                return res;
+            }
+
+            attempts++;
+            int remaining = MAX_ATTEMPTS - attempts;
+            if (remaining <= 0) {
+                passwordScreen.setLockedOut();
+                ui.markAllDirty();
+                ui.render();
+                ui.flush();
+                Serial.println("[BOOT] Hard lockout — halting boot");
+                // Halt — no further attempts until power cycle.
+                for (;;) {
+                    M5.update();
+                    keyboard.update();
+                    (void)keyboard.hasEvent();
+                    ui.render();
+                    ui.flush();
+                    delay(200);
+                }
+            }
+            passwordScreen.setUnlockFailed(remaining);
+            Serial.printf("[BOOT] Unlock failed, %d remaining\n", remaining);
+            // Small delay to slow automated guessing within a single boot.
+            delay(800);
+        }
+    }
+
+    // SETUP path: first-boot or legacy plaintext identity. Show setup.
+    passwordScreen.setMode(PasswordScreen::Mode::SETUP);
+    ui.setScreen(&passwordScreen);
+
+    bool done = false;
+    String submitted;
+    passwordScreen.setSubmitCallback([&](const String& pw) {
+        submitted = pw;
+        done = true;
+    });
+    runBlockingInputLoop([&]() { return done; });
+
+    res.ok = true;
+    res.password = submitted;
+    res.legacyDetected = (state == ReticulumManager::IdentityState::LEGACY_PLAINTEXT);
+    IdentityCrypto::secureZero((void*)submitted.c_str(), submitted.length());
+    return res;
+}
+
+// Drive the migration warning screen and execute the chosen action.
+// Caller has already set the password on rns. Identity is loaded
+// (legacy plaintext form) and MessageStore is initialized.
+static void runLegacyIdentityMigration() {
+    ui.setScreen(&migrationScreen);
+
+    bool done = false;
+    MigrationWarningScreen::Choice choice = MigrationWarningScreen::Choice::IDENTITY_ONLY;
+    migrationScreen.setChoiceCallback([&](MigrationWarningScreen::Choice c) {
+        choice = c;
+        done = true;
+    });
+    runBlockingInputLoop([&]() { return done; });
+
+    migrationScreen.setProgress("Encrypting identity...");
+    ui.markAllDirty(); ui.render(); ui.flush();
+    if (!rns.migrateLegacyIdentity()) {
+        migrationScreen.setProgress("Identity migration FAILED");
+        ui.markAllDirty(); ui.render(); ui.flush();
+        delay(2500);
+        return;
+    }
+
+    if (choice == MigrationWarningScreen::Choice::ALL_MESSAGES) {
+        char buf[48];
+        int converted = messageStore.migratePlaintextMessages(
+            [&](int cur, int total, const char* peer) {
+                snprintf(buf, sizeof(buf), "Encrypting messages %d/%d", cur, total);
+                migrationScreen.setProgress(buf);
+                // Re-render every few files so progress is visible
+                if ((cur & 0x07) == 0 || cur == total) {
+                    ui.markAllDirty(); ui.render(); ui.flush();
+                }
+            });
+        snprintf(buf, sizeof(buf), "Encrypted %d messages", converted);
+        migrationScreen.setProgress(buf);
+    } else {
+        migrationScreen.setProgress("Identity encrypted");
+    }
+    ui.markAllDirty(); ui.render(); ui.flush();
+    delay(1200);
+}
+
+// =============================================================================
 // Setup
 // =============================================================================
 
@@ -858,10 +1072,41 @@ void setup() {
     }
     ui.render();
 
-    // Initialize Reticulum
-    bootScreen.setProgress(0.7f, "Starting Reticulum...");
-    ui.render();
+    // ── Identity-at-rest gate ───────────────────────────────────────────
+    // We must collect (and, for existing devices, verify) the password
+    // BEFORE Reticulum starts so the identity is in the right state when
+    // RNS asks for it. Password is mandatory — there's no skip path.
+    bootScreen.setProgress(0.7f, "Probing identity...");
+    ui.render(); ui.flush();
     rns.setSDStore(&sdStore);
+    ReticulumManager::IdentityState idState = rns.probeIdentityState();
+    Serial.printf("[BOOT] Identity state: %d\n", (int)idState);
+
+    PasswordGateResult pwResult = runPasswordGate(idState);
+    if (!pwResult.ok || pwResult.password.length() == 0) {
+        // Should be unreachable — gate returns only on success or hard halt.
+        Serial.println("[BOOT] Password gate aborted unexpectedly");
+        bootScreen.setProgress(0.7f, "Security FAILED");
+        ui.render(); ui.flush();
+        delay(2000);
+    }
+    rns.setPassword(pwResult.password);
+    if (pwResult.unlockedKey.size() > 0) {
+        // ENCRYPTED path — we already unwrapped the identity externally.
+        // Hand the plaintext key bytes to RNS for adoption.
+        rns.preloadIdentityKey(pwResult.unlockedKey);
+    }
+    // Wipe the password from the local result buffer; rns holds the
+    // authoritative copy now. (Safe because Arduino String makes deep
+    // copies on assignment, unlike RNS::Bytes which is copy-on-write.)
+    IdentityCrypto::secureZero((void*)pwResult.password.c_str(), pwResult.password.length());
+    // Don't zero unlockedKey: rns holds a COW-shared reference; zeroing
+    // would corrupt the live identity.
+
+    // Initialize Reticulum
+    ui.setScreen(&bootScreen);
+    bootScreen.setProgress(0.75f, "Starting Reticulum...");
+    ui.render(); ui.flush();
     if (rns.begin(&radio, &flash)) {
         Serial.printf("[BOOT] Identity: %s\n", rns.identityHash().c_str());
         bootScreen.setProgress(0.9f, "Reticulum active");
@@ -875,7 +1120,20 @@ void setup() {
     bootScreen.setProgress(0.91f, "Starting messaging...");
     ui.render();
     messageStore.begin(&flash, &sdStore);
+    // Pass the loaded identity so messages are encrypted at rest. Identity
+    // outlives messageStore (both are file-scope globals).
+    messageStore.setIdentity(&rns.identity());
     lxmf.begin(&rns, &messageStore);
+
+    // Legacy identity → run mandatory migration flow now that messageStore
+    // is up and we can encrypt existing messages if the user opts in.
+    if (rns.legacyIdentityLoaded()) {
+        Serial.println("[BOOT] Legacy plaintext identity → migration required");
+        runLegacyIdentityMigration();
+        ui.setScreen(&bootScreen);
+        bootScreen.setProgress(0.92f, "Migration complete");
+        ui.render(); ui.flush();
+    }
     lxmf.setMessageCallback([](const LXMFMessage& msg) {
         // This runs in the packet callback context — MUST be non-blocking.
         // No disk I/O, no delays, no heavy computation.

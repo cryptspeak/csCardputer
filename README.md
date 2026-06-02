@@ -1,11 +1,12 @@
 <div align="center">
 
-# rsCardputer
+# rsCardputer — Crypto Edition
 
-**Dual-mode Ratspeak firmware for the M5Stack Cardputer Adv.**
+**Dual-mode Ratspeak firmware for the M5Stack Cardputer Adv, with at-rest encryption for your identity and messages.**
 
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 [![Model](https://img.shields.io/badge/model-Cardputer%20Adv-success.svg)](https://docs.m5stack.com/en/core/Cardputer-Adv)
+[![Encryption](https://img.shields.io/badge/at--rest-AES--256--CTR%20%2B%20HMAC-success.svg)](#crypto-edition--what-changed)
 [![License](https://img.shields.io/badge/license-mixed-blue.svg)](#license)
 
 [Ratspeak](https://github.com/ratspeak/Ratspeak) |
@@ -29,6 +30,7 @@ Both firmwares live in internal ESP32-S3 flash, with support for SD in the futur
 
 ## Contents
 
+- [Crypto Edition — what changed](#crypto-edition--what-changed)
 - [Hardware](#hardware)
 - [Flashing](#flashing)
 - [Radio Presets](#radio-presets)
@@ -36,6 +38,98 @@ Both firmwares live in internal ESP32-S3 flash, with support for SD in the futur
 - [RNode Mode](#rnode-mode)
 - [Build From Source](#build-from-source)
 - [License](#license)
+
+## Crypto Edition — what changed
+
+This build adds **mandatory at-rest encryption** for the Reticulum identity
+and stored messages. The Reticulum and LXMF protocols on the wire are
+**unchanged** — this is purely about protecting what lives on the device's
+flash, NVS, and SD card after the device is powered off.
+
+### What's protected
+
+| Asset | Before | Now |
+|---|---|---|
+| Identity private key (flash, NVS, SD) | Plaintext | AES-256-CTR + HMAC-SHA256, password-wrapped |
+| Message bodies on disk (LXMF JSON) | Plaintext | AES-256-CTR + HMAC-SHA256, identity-derived |
+| Announces / known destinations | Plaintext (public) | Unchanged (public by design) |
+| Reticulum packets on the air | Reticulum protocol crypto | Unchanged |
+
+### Boot flow
+
+```
+Power on
+   │
+   ▼
+┌──────────────────────────────────────────┐
+│  Identity probe                          │
+│   • Encrypted blob found  → UNLOCK       │
+│   • Plaintext identity    → SETUP + MIGRATE
+│   • Nothing               → SETUP        │
+└──────────────────────────────────────────┘
+   │
+   ▼
+┌──────────────────────────────────────────┐
+│  Password screen (VeraCrypt-style)       │
+│   SETUP:  type + confirm (min 6 chars)   │
+│   UNLOCK: type once, up to 10 attempts   │
+│            per power cycle               │
+└──────────────────────────────────────────┘
+   │
+   ▼
+  Reticulum starts → home screen
+```
+
+If a legacy plaintext identity is detected, after the password is set the
+device prompts you to choose how much to migrate:
+
+- **Identity only** *(fast)* — re-wraps the identity key on every tier and
+  removes the plaintext copy. Existing messages stay readable but plaintext
+  on disk.
+- **Identity + messages** *(slow)* — additionally walks every stored
+  conversation and re-encrypts each message file in place. May take a
+  while with many messages; progress is shown.
+
+### Crypto in plain English
+
+- **Password → key**: PBKDF2-HMAC-SHA256, 65,536 iterations, 16-byte
+  random salt per device. Takes a couple of seconds on the ESP32-S3 — that
+  cost is also paid by anyone trying to brute-force your password.
+- **Identity wrap**: the derived KEK is HKDF-split into an AES-256-CTR key
+  and an HMAC-SHA256 key. The identity blob is encrypted, then MACed
+  (encrypt-then-MAC). On unlock, the MAC is checked **before** any
+  decrypt with a constant-time comparison — wrong password, tampered file,
+  or bit-rot all fail without ever producing plaintext.
+- **Message wrap**: at-rest message keys are derived from your identity's
+  X25519 private key via HKDF-SHA256, with the identity hash used as salt.
+  Each file gets a fresh random 16-byte IV, so identical messages don't
+  produce identical ciphertext (no ECB-style structure leakage).
+- **No global key reuse, no malleability**: the MAC covers
+  `magic | version | IV | ciphertext`, so any tampering, truncation, or
+  identity mismatch is rejected.
+- **Lockout**: ten consecutive wrong passwords in one power cycle halts
+  the boot; power the device off and on to try again. No data is wiped on
+  lockout — losing access does not mean losing data.
+- **Password loss = data loss**: there is no recovery code, no backdoor,
+  and the Ratspeak team cannot recover it for you. Pick something you'll
+  remember.
+
+### What this does NOT do
+
+- It does not change anything on the LoRa air or over WiFi/TCP — incoming
+  and outgoing Reticulum/LXMF packets use the protocol's own crypto.
+- It does not encrypt public material: announce-derived contacts,
+  destination tables, your own announce app-data.
+- It is not a substitute for full-disk encryption of a stolen SD card if
+  the user picks a weak password. PBKDF2 raises the cost per attempt but
+  cannot rescue `password123`.
+
+### Threat model
+
+This protects against an attacker who **physically obtains** the device
+(or its SD card / NVS dump) while it is powered off. They cannot read
+the identity or message history without the password. It does **not**
+protect against an attacker who has the device unlocked and running.
 
 ## Hardware
 
@@ -94,7 +188,16 @@ Standalone mode gives the Cardputer Adv a local Reticulum
 identity, LXMF messaging, LoRa operation, TCP access over WiFi,
 GPS time sync, contact/message storage, and on-device settings.
 
-On first boot, Standalone mode asks for timezone - this is so the GPS-received time shows relevant to your timezone, it is not shared with anyone.
+On first boot, Standalone mode asks for:
+
+1. A device password (encrypts the identity and message store at rest — see
+   [Crypto Edition — what changed](#crypto-edition--what-changed)).
+2. Your timezone (so GPS-received time is shown locally — it is not shared
+   with anyone).
+3. Your display name (broadcast in announces, like before).
+
+On every later boot, you'll be prompted for the password before the radio
+or messaging come online.
 
 ## RNode Mode
 

@@ -1,6 +1,7 @@
 #include "ReticulumManager.h"
 #include "config/Config.h"
 #include "storage/FlashStore.h"
+#include "reticulum/IdentityCrypto.h"
 #include <Log.h>
 #include <LittleFS.h>
 #include <Preferences.h>
@@ -8,6 +9,14 @@
 #include <unordered_map>
 #include <string>
 #include <utility>
+
+namespace {
+// NVS key for the encrypted identity blob. Kept distinct from the legacy
+// "privkey" key so we can detect un-migrated installs.
+constexpr const char* NVS_NAMESPACE     = "ratcom_id";
+constexpr const char* NVS_KEY_ENC       = "encid";
+constexpr const char* NVS_KEY_LEGACY    = "privkey";
+}
 
 // RAII lock guard for the shared LittleFS mutex
 struct FSLock {
@@ -314,65 +323,181 @@ bool ReticulumManager::begin(SX1262* radio, FlashStore* flash) {
     return true;
 }
 
-bool ReticulumManager::loadOrCreateIdentity() {
-    // Tier 1: Flash (LittleFS)
-    if (_flash->exists(PATH_IDENTITY)) {
-        uint8_t keyBuf[128];
-        size_t keyLen = 0;
-        if (_flash->readFile(PATH_IDENTITY, keyBuf, sizeof(keyBuf), keyLen) && keyLen > 0) {
-            RNS::Bytes keyData(keyBuf, keyLen);
-            _identity = RNS::Identity(false);
-            if (_identity.load_private_key(keyData)) {
-                Serial.printf("[RNS] Identity loaded from flash: %s\n", _identity.hexhash().c_str());
-                saveIdentityToAll(keyData);
-                return true;
-            }
+// ─── Identity-at-rest helpers ────────────────────────────────────────────────
+
+void ReticulumManager::setPassword(const String& pw) {
+    _password = pw;
+}
+
+void ReticulumManager::clearPassword() {
+    // Overwrite the heap buffer before releasing it. String's destructor
+    // would free without zeroing.
+    if (_password.length() > 0) {
+        for (size_t i = 0; i < _password.length(); i++) {
+            ((char*)_password.c_str())[i] = 0;
         }
-        Serial.println("[RNS] Failed to load identity from flash");
+    }
+    _password = "";
+}
+
+void ReticulumManager::preloadIdentityKey(const RNS::Bytes& key) {
+    _preloadKey = key;
+}
+
+// Best-effort probe: look at each tier and figure out what kind of identity
+// material is present. Reads at most one buffer per tier.
+ReticulumManager::IdentityState ReticulumManager::probeIdentityState() {
+    bool anyEncrypted = false;
+    bool anyPlaintext = false;
+
+    auto classify = [&](const uint8_t* buf, size_t len) {
+        if (len == 0) return;
+        if (IdentityCrypto::isEncrypted(buf, len)) anyEncrypted = true;
+        else                                       anyPlaintext = true;
+    };
+
+    if (_flash && _flash->exists(PATH_IDENTITY)) {
+        uint8_t buf[256];
+        size_t len = 0;
+        if (_flash->readFile(PATH_IDENTITY, buf, sizeof(buf), len)) {
+            classify(buf, len);
+        }
     }
 
-    // Tier 2: NVS (ESP32 Preferences — always available, higher trust than SD)
     {
         Preferences prefs;
-        if (prefs.begin("ratcom_id", true)) {
-            size_t keyLen = prefs.getBytesLength("privkey");
-            if (keyLen > 0 && keyLen <= 128) {
-                uint8_t keyBuf[128];
-                prefs.getBytes("privkey", keyBuf, keyLen);
+        if (prefs.begin(NVS_NAMESPACE, true)) {
+            size_t encLen = prefs.getBytesLength(NVS_KEY_ENC);
+            if (encLen > 0 && encLen <= 512) {
+                uint8_t buf[512];
+                prefs.getBytes(NVS_KEY_ENC, buf, encLen);
+                classify(buf, encLen);
+            } else if (prefs.getBytesLength(NVS_KEY_LEGACY) > 0) {
+                anyPlaintext = true;
+            }
+            prefs.end();
+        }
+    }
+
+    if (_sd && _sd->isReady() && _sd->exists(SD_PATH_IDENTITY)) {
+        uint8_t buf[256];
+        size_t len = 0;
+        if (_sd->readFile(SD_PATH_IDENTITY, buf, sizeof(buf), len)) {
+            classify(buf, len);
+        }
+    }
+
+    // Encryption-present wins over plaintext: any encrypted tier means a
+    // password is required to make sense of the device. Plaintext-only
+    // means a legacy install needing migration.
+    if (anyEncrypted) return IdentityState::ENCRYPTED;
+    if (anyPlaintext) return IdentityState::LEGACY_PLAINTEXT;
+    return IdentityState::NONE;
+}
+
+bool ReticulumManager::migrateLegacyIdentity() {
+    if (_password.length() == 0) {
+        Serial.println("[RNS] migrate: no password set");
+        return false;
+    }
+    if (!_identity) {
+        Serial.println("[RNS] migrate: no identity loaded");
+        return false;
+    }
+    RNS::Bytes privKey = _identity.get_private_key();
+    if (privKey.size() == 0) {
+        Serial.println("[RNS] migrate: identity has no private key");
+        return false;
+    }
+    if (!saveIdentityToAll(privKey)) {
+        Serial.println("[RNS] migrate: write failed");
+        return false;
+    }
+    _legacyLoaded = false;
+    Serial.println("[RNS] Identity migrated to encrypted form");
+    return true;
+}
+
+bool ReticulumManager::loadOrCreateIdentity() {
+    // Fast path: caller (main.cpp) already verified the password and
+    // unwrapped the encrypted blob. We just adopt the plaintext bytes.
+    if (_preloadKey.size() > 0) {
+        _identity = RNS::Identity(false);
+        if (_identity.load_private_key(_preloadKey)) {
+            Serial.printf("[RNS] Identity adopted from preloaded key: %s\n",
+                          _identity.hexhash().c_str());
+            // Re-encrypt to all tiers (heals out-of-sync state). Errors
+            // here are non-fatal — identity is already in RAM.
+            saveIdentityToAll(_preloadKey);
+            // Release our reference. We can't securely-zero the buffer
+            // because RNS::Bytes is copy-on-write — the Identity now
+            // shares the same backing store, and zeroing it would
+            // corrupt the live identity.
+            _preloadKey = RNS::Bytes();
+            return true;
+        }
+        _preloadKey = RNS::Bytes();
+        Serial.println("[RNS] preloaded key invalid");
+        return false;
+    }
+
+    // No preload: this happens only when probe returned LEGACY_PLAINTEXT
+    // (caller already set the password but did not unwrap externally) or
+    // NONE (fresh device). Encrypted-blob handling is the caller's job.
+
+    auto tryLoadPlaintext = [&](const uint8_t* buf, size_t len, const char* src) -> bool {
+        if (len == 0) return false;
+        if (IdentityCrypto::isEncrypted(buf, len)) {
+            // Encrypted but no preload → caller forgot to unwrap. Refuse.
+            Serial.printf("[RNS] %s: encrypted identity but no preload — refusing\n", src);
+            return false;
+        }
+        RNS::Bytes keyData(buf, len);
+        _identity = RNS::Identity(false);
+        if (!_identity.load_private_key(keyData)) return false;
+        Serial.printf("[RNS] Identity loaded from %s (LEGACY plaintext): %s\n",
+                      src, _identity.hexhash().c_str());
+        _legacyLoaded = true;
+        return true;
+    };
+
+    // Tier 1: Flash
+    if (_flash && _flash->exists(PATH_IDENTITY)) {
+        uint8_t buf[256];
+        size_t len = 0;
+        if (_flash->readFile(PATH_IDENTITY, buf, sizeof(buf), len)) {
+            if (tryLoadPlaintext(buf, len, "flash")) return true;
+        }
+    }
+
+    // Tier 2: NVS (check legacy key)
+    {
+        Preferences prefs;
+        if (prefs.begin(NVS_NAMESPACE, true)) {
+            size_t len = prefs.getBytesLength(NVS_KEY_LEGACY);
+            if (len > 0 && len <= 256) {
+                uint8_t buf[256];
+                prefs.getBytes(NVS_KEY_LEGACY, buf, len);
                 prefs.end();
-                RNS::Bytes keyData(keyBuf, keyLen);
-                _identity = RNS::Identity(false);
-                if (_identity.load_private_key(keyData)) {
-                    Serial.printf("[RNS] Identity restored from NVS: %s\n", _identity.hexhash().c_str());
-                    saveIdentityToAll(keyData);
-                    return true;
-                }
+                if (tryLoadPlaintext(buf, len, "NVS-legacy")) return true;
             } else {
                 prefs.end();
             }
         }
     }
 
-    // Tier 3: SD card (lowest trust — may contain another device's identity)
+    // Tier 3: SD
     if (_sd && _sd->isReady() && _sd->exists(SD_PATH_IDENTITY)) {
-        uint8_t keyBuf[128];
-        size_t keyLen = 0;
-        if (_sd->readFile(SD_PATH_IDENTITY, keyBuf, sizeof(keyBuf), keyLen) && keyLen > 0) {
-            RNS::Bytes keyData(keyBuf, keyLen);
-            _identity = RNS::Identity(false);
-            if (_identity.load_private_key(keyData)) {
-                Serial.printf("[RNS] Identity restored from SD: %s\n", _identity.hexhash().c_str());
-                saveIdentityToAll(keyData);
-                return true;
-            }
+        uint8_t buf[256];
+        size_t len = 0;
+        if (_sd->readFile(SD_PATH_IDENTITY, buf, sizeof(buf), len)) {
+            if (tryLoadPlaintext(buf, len, "SD")) return true;
         }
-        Serial.println("[RNS] SD identity exists but failed to load");
     }
 
-    // No identity found anywhere — create new
+    // No identity anywhere — create new and wrap if a password is set.
     _identity = RNS::Identity();
     Serial.printf("[RNS] New identity created: %s\n", _identity.hexhash().c_str());
-
     RNS::Bytes privKey = _identity.get_private_key();
     if (privKey.size() > 0) {
         saveIdentityToAll(privKey);
@@ -380,21 +505,43 @@ bool ReticulumManager::loadOrCreateIdentity() {
     return true;
 }
 
-void ReticulumManager::saveIdentityToAll(const RNS::Bytes& keyData) {
+bool ReticulumManager::saveIdentityToAll(const RNS::Bytes& keyData) {
+    if (keyData.size() == 0) return false;
+    if (_password.length() == 0) {
+        // Mandatory-encryption posture: without a password we have no key
+        // to wrap with. Caller is expected to set it before begin() saves
+        // anything. Returning false is safer than writing plaintext.
+        Serial.println("[RNS] saveIdentityToAll: no password — refusing plaintext write");
+        return false;
+    }
+
+    RNS::Bytes wrapped;
+    if (!IdentityCrypto::wrap(_password, keyData, wrapped)) {
+        Serial.println("[RNS] saveIdentityToAll: wrap failed");
+        return false;
+    }
+
     // Flash
-    _flash->writeAtomic(PATH_IDENTITY, keyData.data(), keyData.size());
-    // SD
+    bool ok = _flash && _flash->writeAtomic(PATH_IDENTITY, wrapped.data(), wrapped.size());
+
+    // SD (best-effort — SD missing is not a hard failure)
     if (_sd && _sd->isReady()) {
         _sd->ensureDir("/ratcom/identity");
-        _sd->writeAtomic(SD_PATH_IDENTITY, keyData.data(), keyData.size());
+        _sd->writeAtomic(SD_PATH_IDENTITY, wrapped.data(), wrapped.size());
     }
-    // NVS (always available)
+
+    // NVS — write encrypted blob under new key, then PURGE the legacy
+    // plaintext key so an attacker dumping NVS gets nothing.
     Preferences prefs;
-    if (prefs.begin("ratcom_id", false)) {
-        prefs.putBytes("privkey", keyData.data(), keyData.size());
+    if (prefs.begin(NVS_NAMESPACE, false)) {
+        prefs.putBytes(NVS_KEY_ENC, wrapped.data(), wrapped.size());
+        if (prefs.isKey(NVS_KEY_LEGACY)) {
+            prefs.remove(NVS_KEY_LEGACY);
+        }
         prefs.end();
-        Serial.println("[RNS] Identity saved to NVS");
+        Serial.println("[RNS] Encrypted identity saved to NVS (legacy key removed)");
     }
+    return ok;
 }
 
 void ReticulumManager::loop() {

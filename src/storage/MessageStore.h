@@ -6,15 +6,32 @@
 #include "storage/SDStore.h"
 #include "storage/WriteQueue.h"
 #include "reticulum/LXMFMessage.h"
+#include <Identity.h>
 #include <vector>
 #include <string>
 #include <map>
 #include <set>
 #include <atomic>
+#include <functional>
 
 class MessageStore {
 public:
     bool begin(FlashStore* flash, SDStore* sd = nullptr);
+
+    // ── At-rest encryption ──────────────────────────────────────────────
+    // Provide the loaded RNS::Identity (with private key) so message blobs
+    // can be encrypted before they hit disk and decrypted on load.
+    // Identity is held by pointer; lifetime must outlive MessageStore.
+    // Calling with nullptr disables encryption (legacy/test path).
+    void setIdentity(const RNS::Identity* identity) { _identity = identity; }
+    bool encryptionEnabled() const { return _identity != nullptr && *_identity; }
+
+    // Walk every stored conversation and re-encrypt any plaintext message
+    // file in place. Safe to call repeatedly — already-encrypted files are
+    // skipped. Progress callback fires per-file (current/total).
+    using MigrationProgressCallback = std::function<void(int current, int total, const char* peerHex)>;
+    int migratePlaintextMessages(MigrationProgressCallback cb = nullptr);
+
 
     // Save a message (incoming or outgoing) — fully non-blocking (<1ms)
     bool saveMessage(LXMFMessage& msg);
@@ -75,6 +92,7 @@ private:
 
     FlashStore* _flash = nullptr;
     SDStore* _sd = nullptr;
+    const RNS::Identity* _identity = nullptr;
     WriteQueue _writeQueue;
     std::vector<std::string> _conversations;
     std::atomic<uint32_t> _nextReceiveCounter{0};

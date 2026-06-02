@@ -36,6 +36,15 @@ public:
 
 class ReticulumManager {
 public:
+    // Identity-at-rest state, probed before begin() so the UI can decide
+    // whether to show password setup, unlock, or migration screens.
+    enum class IdentityState {
+        UNKNOWN,            // probe not yet run
+        NONE,               // no identity at any tier — fresh device
+        ENCRYPTED,          // at least one tier holds an encrypted blob (needs password)
+        LEGACY_PLAINTEXT    // tier(s) hold an unencrypted identity (needs migration)
+    };
+
     ReticulumManager()
         : _reticulum({RNS::Type::NONE}),
           _identity({RNS::Type::NONE}),
@@ -46,6 +55,30 @@ public:
     void setSDStore(SDStore* sd) { _sd = sd; }
     void loop();
     void persistData();
+
+    // ── Identity-at-rest (password-protected) ──────────────────────────────
+    // Pass the user-supplied password before begin(). Required.
+    void setPassword(const String& pw);
+    // Clear cached password (e.g. after lock). After this, save/migrate
+    // operations will fail until setPassword() is called again.
+    void clearPassword();
+
+    // Look at all storage tiers without modifying anything; classify the
+    // identity-at-rest state. Cheap — only reads file headers.
+    IdentityState probeIdentityState();
+
+    // Was the loaded identity stored in plaintext (pre-encryption upgrade)?
+    bool legacyIdentityLoaded() const { return _legacyLoaded; }
+
+    // Pre-supply a decrypted private-key blob (used when main.cpp has
+    // already verified the password externally). When set, begin() uses
+    // this instead of reading from disk. Cleared after begin().
+    void preloadIdentityKey(const RNS::Bytes& key);
+
+    // Wrap the currently-loaded identity with the stored password and
+    // write the encrypted form to every storage tier. Removes any
+    // legacy-plaintext residue. Returns true on success.
+    bool migrateLegacyIdentity();
 
     // Identity
     const RNS::Identity& identity() const { return _identity; }
@@ -68,7 +101,10 @@ public:
 
 private:
     bool loadOrCreateIdentity();
-    void saveIdentityToAll(const RNS::Bytes& keyData);
+    // Writes the encrypted (wrapped) identity blob to flash + NVS + SD.
+    // `keyData` is the raw private-key bytes; wrapping happens here using
+    // the cached _password. Caller must have already setPassword().
+    bool saveIdentityToAll(const RNS::Bytes& keyData);
     void startPersistTask();
     static void persistTaskFunc(void* param);
 
@@ -87,4 +123,9 @@ private:
     // Background persist task (core 0) — flash writes don't block main loop
     QueueHandle_t _persistQueue = nullptr;
     TaskHandle_t _persistTask = nullptr;
+
+    // Identity-at-rest state
+    String _password;                // held in RAM only — cleared on clearPassword()
+    RNS::Bytes _preloadKey;          // when non-empty, begin() uses this directly
+    bool _legacyLoaded = false;      // true if loaded identity was found in plaintext
 };
