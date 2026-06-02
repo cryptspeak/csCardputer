@@ -2,7 +2,7 @@
 
 # rsCardputer — Crypto Edition
 
-**Dual-mode Ratspeak firmware for the M5Stack Cardputer Adv, with at-rest encryption for your identity and messages.**
+**Standalone Ratspeak firmware for the M5Stack Cardputer Adv, with at-rest-encryption for your identity and messages.**
 
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 [![Model](https://img.shields.io/badge/model-Cardputer%20Adv-success.svg)](https://docs.m5stack.com/en/core/Cardputer-Adv)
@@ -18,15 +18,9 @@
 
 ---
 
-rsCardputer turns [M5Stack's Cardputer Adv](https://shop.m5stack.com/products/m5stack-cardputer-adv-version-esp32-s3?srsltid=AfmBOoqkAKYv165WC27WbB4bj73CxxMa12pImKTrkvyk9ZtqFUb4_gPt$0) into a local two-mode
-Reticulum device. On boot, the launcher lets you choose between:
+rsCardputer-CE is a standalone Reticulum/LXMF firmware image for the M5Stack Cardputer Adv. This repository currently builds only the standalone image, and the current encryption design is implemented inside that firmware.
 
-- **Standalone**: a Reticulum/LXMF messenger that runs entirely on the
-  Cardputer Adv.
-- **RNode**: a host-controlled RNode-style interface for Ratspeak,
-  Sideband, or other Reticulum clients over BLE or USB serial.
-
-Both firmwares live in internal ESP32-S3 flash, with support for SD in the future to reduce flash usage. There are individual releases available for just Standalone or just RNode as well for those using pre-existing flashers or wanting just one firmware.
+On boot, the device starts the standalone Reticulum/LXMF messenger interface.
 
 ## Contents
 
@@ -35,7 +29,6 @@ Both firmwares live in internal ESP32-S3 flash, with support for SD in the futur
 - [Flashing](#flashing)
 - [Radio Presets](#radio-presets)
 - [Standalone Mode](#standalone-mode)
-- [RNode Mode](#rnode-mode)
 - [Build From Source](#build-from-source)
 - [License](#license)
 
@@ -145,22 +138,7 @@ The supported Cardputer Adv has:
 
 ## Flashing
 
-For flashing with a pre-built firmware, use [Ratspeak's flasher](https://ratspeak.org/download.html) in a supported browser, and flash the device in just a few clicks.
-
-To flash locally, connect the Cardputer Adv over USB and find
-the serial port:
-
-```bash
-ls /dev/cu.usbmodem*      # macOS
-ls /dev/ttyACM*           # Linux
-```
-
-Then flash the merged image:
-
-```bash
-cd rsCardputer
-make flash port=/dev/cu.usbmodem3101
-```
+This repository builds only the standalone firmware. To flash the device, build and upload manually with PlatformIO as described in [Build From Source](#build-from-source).
 
 ## Radio Presets
 
@@ -175,8 +153,7 @@ make flash port=/dev/cu.usbmodem3101
 | **Long Fast** *(default)* | **11** | **250 kHz** | **4/5** | **22 dBm** | **1.07 kbps** | **153 dB** |
 | Long Moderate | 11 | 125 kHz | 4/8 | 22 dBm | 0.34 kbps | 156 dB |
 
-Host clients can change the RNode radio profile through normal RNode commands, typically in-app.
-Standalone mode also exposes radio settings on-device.
+Standalone mode exposes radio settings on-device.
 
 The supported SX1262 cap is an 850-950 MHz radio target. 868 MHz and 915 MHz
 are valid software profiles for that hardware range. 433 MHz requires 433 MHz
@@ -184,109 +161,40 @@ radio hardware. You are responsible for operating within your local laws.
 
 ## Standalone Mode
 
-Standalone mode gives the Cardputer Adv a local Reticulum
-identity, LXMF messaging, LoRa operation, TCP access over WiFi,
-GPS time sync, contact/message storage, and on-device settings.
-
-On first boot, Standalone mode asks for:
-
-1. A device password (encrypts the identity and message store at rest — see
-   [Crypto Edition — what changed](#crypto-edition--what-changed)).
-2. Your timezone (so GPS-received time is shown locally — it is not shared
-   with anyone).
-3. Your display name (broadcast in announces, like before).
-
-On every later boot, you'll be prompted for the password before the radio
-or messaging come online.
-
-## RNode Mode
-
-RNode mode behaves like an RNode radio for any Reticulum client.
-
-- USB CDC serial carries the normal RNode KISS protocol.
-- BLE is enabled by default for phone/client reconnection.
-- Hold `p` or `OK` for three seconds to enter BLE pairing mode.
-- Hold `b` for three seconds to toggle BLE on or off.
-- Pairing mode times out after 30 seconds if no client connects.
-- The radio stays idle until the host client connects.
-
-The RNode target self-provisions its EEPROM identity and firmware hash on first
-boot, so users should not need a separate `rnodeconf` setup step to clear
-config or firmware-corrupt warnings.
+This firmware supports only standalone mode in its current form.
 
 ## Build From Source
 
-rsCardputer is a single source tree. Standalone mode, the RNode target, the launcher,
-partition layout, and package tooling are all included in this repository.
+To build the firmware from source, install the prerequisites:
 
-Install prerequisites:
+- Python 3
+- PlatformIO
 
-- Python 3.
-- PlatformIO.
-- `arduino-cli`.
-- ESP32 Arduino core and M5 libraries for the RNode build.
-
-Install the Python tools:
+Install the Python tooling:
 
 ```bash
 python3 -m pip install platformio esptool
 ```
 
-One-time RNode dependency setup:
+Build the standalone firmware with:
 
 ```bash
-make prep-cardputer_adv
+pio run -e standalone_915
 ```
 
-Build all firmware images and package the release artifacts:
+Flash it manually with PlatformIO:
 
 ```bash
-make package
+pio run -e standalone_915 -t upload
 ```
 
-Build targets are split so each component can also be worked on independently:
-
-```bash
-make build-launcher      # launcher only
-make build-standalone    # standalone messenger app
-make build-rnode         # host-controlled RNode target
-make full-image          # launcher + Standalone + RNode
-make standalone-image    # standalone merged image
-make rnode-only-image    # standalone RNode merged image
-```
-
-Release artifacts are written to `dist/`:
-
-```text
-dist/rscardputer-full.zip
-dist/rscardputer-standalone.zip
-dist/rscardputer-rnode.zip
-dist/rscardputer-standalone-m5launcher.bin
-dist/rscardputer-rnode-m5launcher.bin
-```
-
-Use the `.zip` files with the Ratspeak web flasher. Each zip contains a merged
-factory image and the web-flasher manifest for the Cardputer Adv. Raw `.bin`
-files under `build/` are internal build outputs.
-
-The `*-m5launcher.bin` files are app images for M5Launcher users who already
-boot through bmorcelli's Launcher and want to start Standalone or RNode directly
-from SD, without using the bundled rsCardputer launcher.
-
-Flash the bundled launcher image with:
-
-```bash
-make flash port=/dev/cu.usbmodem3101
-```
-
-CI uses the same `make package` flow and publishes the bundled image plus both
-individual firmware images.
+> Note: this repository currently requires manual PlatformIO build and upload; the Makefile workflow is not fully functional yet.
 
 ## License & Contribution
 
 Ratspeak's Cardputer standalone application, launcher, partition tables, and packaging tools are licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
 
 The bundled RNode firmware under `vendor/rnode_firmware/` is licensed under
-the GNU General Public License v3.0. See [LICENSE-RNODE](LICENSE-RNODE).
+the GNU General Public License v3.0. See [LICENSE-RNODE](LICENSE-RNODE).a
 
 Standalone mode uses a [custom fork](https://github.com/ratspeak/microReticulum) of microReticulum, which was originally written by [Chad Atterman](https://github.com/attermann).
