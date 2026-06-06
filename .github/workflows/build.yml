@@ -7,93 +7,69 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  ARDUINO_CLI_VERSION: 1.4.1
-
 jobs:
-  package:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install Arduino CLI
-        run: |
-          mkdir -p "$RUNNER_TEMP/arduino-cli"
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
-            | BINDIR="$RUNNER_TEMP/arduino-cli" sh -s "$ARDUINO_CLI_VERSION"
-          echo "$RUNNER_TEMP/arduino-cli" >> "$GITHUB_PATH"
 
       - name: Install Python tools
         run: pip install platformio esptool
 
-      - name: Prepare RNode Arduino dependencies
-        run: make -C vendor/rnode_firmware prep-cardputer_adv
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
 
-      - name: Build release package
+      - name: Build firmware
+        run: make build-standalone
+
+      - name: Package firmware
         run: make package
 
-      - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v7
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
         with:
           name: rscardputer-firmware
-          path: dist/*
+          path: dist/rscardputer-standalone.zip
 
   release:
-    needs: package
+    needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
         with:
-          python-version: '3.12'
+          name: rscardputer-firmware
+          path: dist/
 
-      - name: Install Arduino CLI
-        run: |
-          mkdir -p "$RUNNER_TEMP/arduino-cli"
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
-            | BINDIR="$RUNNER_TEMP/arduino-cli" sh -s "$ARDUINO_CLI_VERSION"
-          echo "$RUNNER_TEMP/arduino-cli" >> "$GITHUB_PATH"
-
-      - name: Install Python tools
-        run: pip install platformio esptool
-
-      - name: Prepare RNode Arduino dependencies
-        run: make -C vendor/rnode_firmware prep-cardputer_adv
-
-      - name: Build release package
-        run: make package
-
-      - name: Create Release
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
           release_args=(--generate-notes)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             release_args+=(--prerelease)
           fi
 
-          artifacts=(
-            dist/rscardputer-full.zip
-            dist/rscardputer-standalone.zip
-            dist/rscardputer-rnode.zip
-            dist/rscardputer-standalone-m5launcher.bin
-            dist/rscardputer-rnode-m5launcher.bin
-          )
-
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${artifacts[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$GITHUB_REF_NAME" dist/rscardputer-standalone.zip \
+              --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$GITHUB_REF_NAME" "${artifacts[@]}" "${release_args[@]}" --repo "$GITHUB_REPOSITORY"
+            gh release create "$GITHUB_REF_NAME" dist/rscardputer-standalone.zip \
+              "${release_args[@]}" --repo "$GITHUB_REPOSITORY"
           fi
