@@ -22,7 +22,7 @@
 #define LORA_USE_DCDC_REGULATOR false  // M5 Cap LoRa-1262 examples use LDO-only regulator mode
 #define LORA_OCP_TUNED          0x28   // RNode Cardputer Adv board tuning
 #define LORA_DEFAULT_FREQ       915000000
-#define LORA_DEFAULT_BW         250000   // Long Fast preset (matches Ratdeck)
+#define LORA_DEFAULT_BW         250000   // Long Fast preset (matches rsDeck)
 #define LORA_DEFAULT_SF         11
 #define LORA_DEFAULT_CR         5
 #define LORA_MAX_TX_POWER       22       // Cap LoRa-1262 documented maximum

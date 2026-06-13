@@ -130,7 +130,7 @@ unsigned long loopCycleStart = 0;
 unsigned long maxLoopTime = 0;
 
 // --- Intervals ---
-constexpr unsigned long RNS_INTERVAL_MS = 10;         // 100 Hz (matches Ratdeck)
+constexpr unsigned long RNS_INTERVAL_MS = 10;         // 100 Hz (matches rsDeck)
 constexpr unsigned long RENDER_INTERVAL_MS = 50;       // 20 FPS
 constexpr unsigned long STATUS_UPDATE_MS = 1000;       // 1 Hz status bar
 constexpr unsigned long ANNOUNCE_INTERVAL_MS = 120000; // 2 minutes
