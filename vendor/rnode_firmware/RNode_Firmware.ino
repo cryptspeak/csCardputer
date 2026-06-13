@@ -580,8 +580,10 @@ bool startRadio() {
       return false;
     }
   } else {
-    // If radio is already on, we silently
-    // ignore the request.
+    // If radio is already on, re-arm receive. Host reconnects normally replay
+    // radio parameters before RADIO_STATE=ON; SX1262 reconfiguration uses
+    // standby, so the final ON command must put the modem back in RX.
+    if (radio_online && !console_active) { lora_receive(); }
     kiss_indicate_radiostate();
     return true;
   }
