@@ -308,6 +308,12 @@ void sx126x::readBuffer(uint8_t* buffer, size_t size) {
 }
 
 void sx126x::setModulationParams(uint8_t sf, uint8_t bw, uint8_t cr, int ldro) {
+  // SX1262 only accepts SetModulationParams from standby. During host
+  // reconnects, RNode may already be in continuous RX when the host reapplies
+  // a radio preset; issuing this opcode from RX is silently ignored.
+  standby();
+  if (!loraMode()) { return; }
+
   // Because there is no access to these registers on the sx1262, we have
   // to set all these parameters at once or not at all.
   uint8_t buf[8];
@@ -323,6 +329,12 @@ void sx126x::setModulationParams(uint8_t sf, uint8_t bw, uint8_t cr, int ldro) {
 }
 
 void sx126x::setPacketParams(long preamble_symbols, uint8_t headermode, uint8_t payload_length, uint8_t crc) {
+  // SetPacketParams has the same standby-mode requirement as modulation
+  // parameters. Keep this in the low-level driver so callers cannot leave the
+  // modem in a stale packet format after live reconfiguration.
+  standby();
+  if (!loraMode()) { return; }
+
   // Because there is no access to these registers on the sx1262, we have
   // to set all these parameters at once or not at all.
   uint8_t buf[9];
@@ -825,6 +837,8 @@ void sx126x::setTxPower(int level, int outputPin) {
 uint8_t sx126x::getTxPower() { return _txp; }
 
 void sx126x::setFrequency(long frequency) {
+  standby();
+  calibrate_image(frequency);
   _frequency = frequency;
   uint8_t buf[4];
   uint32_t freq = (uint32_t)((double)frequency / (double)FREQ_STEP_6X);
