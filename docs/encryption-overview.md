@@ -1,6 +1,6 @@
 # Encryption Overview
 
-rsCardputer-CE's "Crypto Edition" adds **mandatory at-rest encryption** for
+Cryptspeak, rsCardputer-CE's at-rest encryption layer, adds **mandatory at-rest encryption** for
 everything the firmware writes to flash, NVS, and SD card. It does not
 change anything about the Reticulum/LXMF wire protocol — packets on LoRa,
 WiFi, or TCP keep using their own protocol-level crypto, unmodified. This
@@ -18,8 +18,8 @@ and [arduino-rns-password](https://github.com/konsumer/arduino-rns-password).
 
 | Data category | Storage | Encrypted? | Module |
 |---|---|---|---|
-| Identity private key | Flash, NVS, SD | Yes (original Crypto Edition feature) | [`IdentityCrypto`](encryption-identity.md) |
-| LXMF message bodies | Flash, SD | Yes (original Crypto Edition feature) | [`MessageEncryption`](encryption-messages.md) |
+| Identity private key | Flash, NVS, SD | Yes (original Cryptspeak feature) | [`IdentityCrypto`](encryption-identity.md) |
+| LXMF message bodies | Flash, SD | Yes (original Cryptspeak feature) | [`MessageEncryption`](encryption-messages.md) |
 | Saved contacts + name cache | Flash, SD | **Yes — added in this change** | [`ContactsEncryption`](encryption-contacts-settings.md) |
 | Device settings (WiFi passwords, TCP hubs, radio config, display name) | Flash, NVS, SD | **Yes — added in this change** | [`SettingsEncryption`](encryption-contacts-settings.md) |
 | Announces / destination hashes on the air | — | Not applicable — public by Reticulum's own design | — |

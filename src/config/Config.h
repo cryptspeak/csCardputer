@@ -4,10 +4,12 @@
 // rsCardputer Standalone — Compile-Time Configuration
 // =============================================================================
 
-#define RSCARDPUTER_VERSION_MAJOR  2
+// Independent release line starting at 0.0.1 — no longer mirrors the
+// upstream ratspeak/rsCardputer version numbering (see docs/firmware-architecture.md).
+#define RSCARDPUTER_VERSION_MAJOR  0
 #define RSCARDPUTER_VERSION_MINOR  0
 #define RSCARDPUTER_VERSION_PATCH  1
-#define RSCARDPUTER_VERSION_STRING "2.0.1"
+#define RSCARDPUTER_VERSION_STRING "0.0.1"
 
 // --- Feature Flags ---
 #define HAS_DISPLAY     true
