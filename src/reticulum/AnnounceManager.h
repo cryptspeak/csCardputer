@@ -39,6 +39,14 @@ public:
     void setLocalDestHash(const RNS::Bytes& hash) { _localDestHash = hash; }
     void setLoRaInterface(LoRaInterface* li) { _loraIf = li; }
 
+    // ── At-rest encryption ──────────────────────────────────────────────
+    // Provide the loaded RNS::Identity (with private key) so contact files
+    // and the name cache are encrypted before they hit disk and decrypted
+    // on load. Identity is held by pointer; lifetime must outlive this
+    // object. Calling with nullptr disables encryption (legacy/test path).
+    void setIdentity(const RNS::Identity* identity) { _identity = identity; }
+    bool encryptionEnabled() const { return _identity != nullptr && *_identity; }
+
     // Save/load persisted contacts
     void saveContacts();
     void loadContacts();
@@ -86,6 +94,7 @@ private:
     SDStore* _sd = nullptr;
     FlashStore* _flash = nullptr;
     LoRaInterface* _loraIf = nullptr;
+    const RNS::Identity* _identity = nullptr;
     RNS::Bytes _localDestHash;
     bool _contactsDirty = false;
     bool _nameCacheDirty = false;

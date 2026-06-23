@@ -2,10 +2,36 @@
 #include "config/Config.h"
 #include "storage/SDStore.h"
 #include "storage/FlashStore.h"
+#include "storage/ContactsEncryption.h"
 #include "hal/SharedSPIBus.h"
 #include "transport/LoRaInterface.h"
 #include <ArduinoJson.h>
 // LittleFS access through FlashStore (mutex-protected)
+
+namespace {
+// Wraps a JSON String in the at-rest envelope when an identity is
+// available. Mirrors MessageStore's maybeEncrypt/maybeDecrypt pattern.
+String maybeEncryptContact(const RNS::Identity* identity, const String& json) {
+    if (!identity || !*identity) return json;
+    String envelope;
+    if (ContactsEncryption::encryptString(*identity, json, envelope)) {
+        return envelope;
+    }
+    Serial.println("[CONTACT] encrypt failed — writing plaintext fallback");
+    return json;
+}
+
+// Inverse of maybeEncryptContact. Transparently passes through legacy
+// plaintext files (no magic header) so migration can be incremental.
+// Returns false if the blob is encrypted but no identity is available, or
+// decryption fails (wrong identity / tampered file) — caller should skip.
+bool maybeDecryptContact(const RNS::Identity* identity, const String& raw, String& out) {
+    if (raw.length() == 0) { out = ""; return true; }
+    if (!ContactsEncryption::isEncrypted(raw)) { out = raw; return true; }  // legacy
+    if (!identity || !*identity) return false;
+    return ContactsEncryption::decryptOrPassthrough(*identity, raw, out);
+}
+}  // namespace
 
 // Skip one MsgPack value at data[pos], return new pos (or len on error)
 static size_t mpSkipValue(const uint8_t* data, size_t len, size_t pos) {
@@ -421,6 +447,7 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
 
     String json;
     serializeJson(doc, json);
+    json = maybeEncryptContact(_identity, json);
 
     String filename = hexHash.substr(0, 16).c_str();
     filename += ".json";
@@ -494,7 +521,13 @@ void AnnounceManager::loadContacts() {
                 filesFound++;
                 size_t size = entry.size();
                 if (size > 0 && size < 2048) {
-                    String json = entry.readString();
+                    String raw = entry.readString();
+                    String json;
+                    if (!maybeDecryptContact(_identity, raw, json)) {
+                        Serial.printf("[CONTACT] decrypt failed, skipping: %s\n", entryName.c_str());
+                        entry = dir.openNextFile();
+                        continue;
+                    }
 
                     JsonDocument doc;
                     if (!deserializeJson(doc, json)) {
@@ -620,26 +653,32 @@ void AnnounceManager::saveNameCache() {
     }
     String json;
     serializeJson(doc, json);
+    String envelope = maybeEncryptContact(_identity, json);
     if (_sd && _sd->isReady()) {
         _sd->ensureDir(SD_PATH_CONFIG_DIR);
-        _sd->writeString("/ratcom/config/names.json", json);
+        _sd->writeString("/ratcom/config/names.json", envelope);
     }
     if (_flash && _flash->isReady()) {
         _flash->ensureDir("/config");
-        _flash->writeString("/config/names.json", json);
+        _flash->writeString("/config/names.json", envelope);
     }
     Serial.printf("[ANNOUNCE] Name cache saved (%d entries)\n", (int)_nameCache.size());
 }
 
 void AnnounceManager::loadNameCache() {
-    String json;
+    String raw;
     if (_sd && _sd->isReady()) {
-        json = _sd->readString("/ratcom/config/names.json");
+        raw = _sd->readString("/ratcom/config/names.json");
     }
-    if (json.isEmpty() && _flash && _flash->isReady()) {
-        json = _flash->readString("/config/names.json");
+    if (raw.isEmpty() && _flash && _flash->isReady()) {
+        raw = _flash->readString("/config/names.json");
     }
-    if (json.isEmpty()) return;
+    if (raw.isEmpty()) return;
+    String json;
+    if (!maybeDecryptContact(_identity, raw, json)) {
+        Serial.println("[ANNOUNCE] Name cache decrypt failed — ignoring (wrong identity or tampered)");
+        return;
+    }
     JsonDocument doc;
     if (deserializeJson(doc, json)) return;
     for (JsonPair kv : doc.as<JsonObject>()) {
