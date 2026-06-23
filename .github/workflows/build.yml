@@ -73,3 +73,14 @@ jobs:
             gh release create "$GITHUB_REF_NAME" dist/rscardputer-standalone.zip \
               "${release_args[@]}" --repo "$GITHUB_REPOSITORY"
           fi
+
+      - name: Publish firmware to GitHub Pages
+        # Release assets aren't served with CORS headers, which breaks
+        # browser-based flashers (e.g. fetch() from a web flasher's own
+        # origin). Pages serves with CORS enabled by default, so mirror
+        # the same zip there too.
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: dist
+          keep_files: true
