@@ -14,15 +14,15 @@ or the message/identity domains.
 ## This covers two distinct upgrade paths, not just one
 
 It's worth being explicit about this because it's easy to assume the
-migration only matters for the upstream/non-crypto → Crypto-Edition jump.
+migration only matters for the upstream/non-encrypted → Cryptspeak jump.
 It actually covers two separate populations of existing devices:
 
-1. **Upstream (non-Crypto-Edition) devices** — nothing is encrypted yet.
+1. **Upstream (non-Cryptspeak) devices** — nothing is encrypted yet.
    `ReticulumManager::probeIdentityState()` returns `LEGACY_PLAINTEXT`,
    `legacyIdentityLoaded()` becomes `true`, and the existing
    identity/message migration flow (opt-in, with a progress screen for
    messages — see [boot-sequence.md](boot-sequence.md)) runs.
-2. **Existing Crypto Edition devices** — identity and messages are
+2. **Existing Cryptspeak devices** — identity and messages are
    *already* encrypted from a prior version of this firmware, but
    contacts and settings were still plaintext (the gap this branch
    closes). `probeIdentityState()` returns `ENCRYPTED`, the normal

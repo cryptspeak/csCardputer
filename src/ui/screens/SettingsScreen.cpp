@@ -625,14 +625,14 @@ void SettingsScreen::renderAbout(M5Canvas& canvas) {
     Theme::useSmallFont(canvas);
     int y = y0 + headerH + 5;
     canvas.setTextColor(Theme::PRIMARY);
-    canvas.drawString("rsCardputer v" RSCARDPUTER_VERSION_STRING, 4, y); y += 10;
+    canvas.drawString("Cryptspeak v" RSCARDPUTER_VERSION_STRING, 4, y); y += 10;
 
     canvas.setTextColor(Theme::SECONDARY);
     canvas.drawString("M5Stack Cardputer Adv", 4, y); y += 10;
     canvas.drawString("Cap LoRa-1262 (SX1262)", 4, y); y += 10;
 
     canvas.setTextColor(Theme::MUTED);
-    canvas.drawString("ratspeak.org", 4, y); y += 12;
+    canvas.drawString("rsCardputer-CE", 4, y); y += 12;
 
     canvas.setTextColor(Theme::SECONDARY);
     String idLine = "ID: " + _identityHash;

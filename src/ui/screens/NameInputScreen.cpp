@@ -5,18 +5,18 @@
 void NameInputScreen::render(M5Canvas& canvas) {
     int cx = Theme::SCREEN_W / 2;
 
-    // "RATSPEAK" title
+    // "CRYPTSPEAK" title
     canvas.setTextSize(2);
     canvas.setTextColor(Theme::PRIMARY);
-    const char* title = "RATSPEAK";
+    const char* title = "CRYPTSPEAK";
     int tw = strlen(title) * 12;
     canvas.setCursor(cx - tw / 2, Theme::CONTENT_Y + 8);
     canvas.print(title);
 
-    // "ratspeak.org" subtitle
+    // "rsCardputer-CE" subtitle
     canvas.setTextSize(1);
     canvas.setTextColor(Theme::MUTED);
-    const char* sub = "ratspeak.org";
+    const char* sub = "rsCardputer-CE";
     int sw = strlen(sub) * Theme::CHAR_W;
     canvas.setCursor(cx - sw / 2, Theme::CONTENT_Y + 28);
     canvas.print(sub);
