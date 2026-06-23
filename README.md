@@ -1,12 +1,12 @@
 <div align="center">
 
-# rsCardputer — Crypto Edition
+# Cryptspeak
 
-**Standalone Ratspeak firmware for the M5Stack Cardputer Adv, with at-rest-encryption for your identity, messages, contacts, and settings.**
+**rsCardputer-CE — standalone Reticulum/LXMF firmware for the M5Stack Cardputer Adv, with at-rest encryption for your identity, messages, contacts, and settings.**
 
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 [![Model](https://img.shields.io/badge/model-Cardputer%20Adv-success.svg)](https://docs.m5stack.com/en/core/Cardputer-Adv)
-[![Encryption](https://img.shields.io/badge/at--rest-AES--256--CTR%20%2B%20HMAC-success.svg)](#crypto-edition--what-changed)
+[![Encryption](https://img.shields.io/badge/at--rest-AES--256--CTR%20%2B%20HMAC-success.svg)](#cryptspeak--what-changed)
 [![License](https://img.shields.io/badge/license-mixed-blue.svg)](#credits--license)
 
 [Ratspeak](https://github.com/ratspeak/Ratspeak) |
@@ -18,8 +18,8 @@
 
 ---
 
-rsCardputer-CE is a standalone Reticulum/LXMF firmware image for the
-M5Stack Cardputer Adv, built on top of
+Cryptspeak (rsCardputer-CE) is a standalone Reticulum/LXMF firmware
+image for the M5Stack Cardputer Adv, built on top of
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) with
 mandatory at-rest encryption added on top. This repository currently
 builds only the standalone image.
@@ -32,7 +32,7 @@ encryption works end to end, see [`docs/`](docs/README.md) — start with
 
 ## Contents
 
-- [Crypto Edition — what changed](#crypto-edition--what-changed)
+- [Cryptspeak — what changed](#cryptspeak--what-changed)
 - [Documentation](#documentation)
 - [Hardware](#hardware)
 - [Flashing](#flashing)
@@ -41,7 +41,7 @@ encryption works end to end, see [`docs/`](docs/README.md) — start with
 - [Build From Source](#build-from-source)
 - [Credits & License](#credits--license)
 
-## Crypto Edition — what changed
+## Cryptspeak — what changed
 
 This build adds **mandatory at-rest encryption** for the Reticulum
 identity, stored messages, saved contacts, and device settings. The
@@ -102,8 +102,8 @@ Saved contacts and device settings are migrated separately from the above
 choice, and don't prompt — both are capped in size (≤50 contacts, one
 settings file), so they're re-encrypted unconditionally and immediately,
 every time a valid identity is available at boot. This also covers
-devices that were already on a Crypto Edition build with an encrypted
-identity and messages but unencrypted contacts/settings (an earlier gap,
+devices that were already on an earlier Cryptspeak build with an
+encrypted identity and messages but unencrypted contacts/settings (an earlier gap,
 now closed) — they get the same automatic upgrade on first boot after
 updating, with no separate migration path needed. See
 [`docs/encryption-contacts-settings.md`](docs/encryption-contacts-settings.md)
@@ -248,7 +248,7 @@ pio run -e standalone_915 -t upload
 
 - **Base firmware** — this is a fork of
   [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer), with the
-  Crypto Edition at-rest encryption layer added on top.
+  Cryptspeak at-rest encryption layer added on top.
 - **Reticulum** — standalone mode uses a
   [custom fork](https://github.com/ratspeak/microReticulum) of
   [microReticulum](https://github.com/attermann/microReticulum), originally

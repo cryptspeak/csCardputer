@@ -5,18 +5,18 @@
 void DataCleanScreen::render(M5Canvas& canvas) {
     int cx = Theme::SCREEN_W / 2;
 
-    // "RATSPEAK" title
+    // "CRYPTSPEAK" title
     canvas.setTextSize(2);
     canvas.setTextColor(Theme::PRIMARY);
-    const char* titleStr = "RATSPEAK";
+    const char* titleStr = "CRYPTSPEAK";
     int tw = strlen(titleStr) * 12;
     canvas.setCursor(cx - tw / 2, Theme::CONTENT_Y + 4);
     canvas.print(titleStr);
 
-    // "ratspeak.org" subtitle
+    // "rsCardputer-CE" subtitle
     canvas.setTextSize(1);
     canvas.setTextColor(Theme::MUTED);
-    const char* sub = "ratspeak.org";
+    const char* sub = "rsCardputer-CE";
     int sw = strlen(sub) * Theme::CHAR_W;
     canvas.setCursor(cx - sw / 2, Theme::CONTENT_Y + 24);
     canvas.print(sub);

@@ -1304,7 +1304,6 @@ void setup() {
     audio.playBoot();
 
     bootComplete = true;
-    ui.statusBar().setTransportMode("Ratspeak.org");
 
     // Set up screens
     homeScreen.setReticulumManager(&rns);

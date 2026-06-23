@@ -1,7 +1,7 @@
 # rsCardputer-CE Documentation
 
 This folder documents how the firmware works, with a focus on the at-rest
-encryption system (the "Crypto Edition" feature set) since that is the part
+encryption system (the "Cryptspeak" feature set) since that is the part
 most likely to need careful review.
 
 ## Encryption

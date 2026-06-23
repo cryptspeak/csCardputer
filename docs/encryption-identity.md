@@ -66,7 +66,7 @@ password has been set — encryption is mandatory, there's no skip path.
 
 ## Legacy plaintext → encrypted migration
 
-If a device was provisioned before the Crypto Edition (or its identity
+If a device was provisioned before Cryptspeak (or its identity
 file predates this scheme), `ReticulumManager::probeIdentityState()`
 detects the absence of the `RID1` magic and classifies the identity as
 `LEGACY_PLAINTEXT`. The boot flow then:
