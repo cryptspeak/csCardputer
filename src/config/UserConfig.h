@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <Identity.h>
 #include "storage/FlashStore.h"
 #include "storage/SDStore.h"
 #include "config/Config.h"
@@ -75,10 +76,22 @@ public:
     UserSettings& settings() { return _settings; }
     const UserSettings& settings() const { return _settings; }
 
+    // ── At-rest encryption ──────────────────────────────────────────────
+    // Provide the loaded RNS::Identity (with private key) so settings
+    // (including WiFi passwords and TCP endpoints) are encrypted before
+    // they hit disk/NVS and decrypted on load. Identity is held by
+    // pointer; lifetime must outlive this object. Calling with nullptr
+    // disables encryption (legacy/test path).
+    void setIdentity(const RNS::Identity* identity) { _identity = identity; }
+    bool encryptionEnabled() const { return _identity != nullptr && *_identity; }
+
 private:
     bool parseJson(const String& json);
     String serializeToJson();
     void sanitizeSettings();
+    String maybeEncrypt(const String& json) const;
+    bool maybeDecrypt(const String& raw, String& out) const;
 
     UserSettings _settings;
+    const RNS::Identity* _identity = nullptr;
 };

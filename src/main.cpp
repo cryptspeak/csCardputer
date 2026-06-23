@@ -1163,13 +1163,29 @@ void setup() {
     announceManager->setStorage(&sdStore, &flash);
     announceManager->setLocalDestHash(rns.destination().hash());
     if (rns.loraInterface()) announceManager->setLoRaInterface(rns.loraInterface());
+    // Identity is loaded (see boot gate above) — wire it in before loading
+    // so contact files and the name cache are decrypted/encrypted at rest.
+    announceManager->setIdentity(&rns.identity());
     announceManager->loadContacts();
     announceManager->loadNameCache();
     announceHandler = RNS::HAnnounceHandler(announceManager);
     RNS::Transport::register_announce_handler(announceHandler);
+    if (announceManager->encryptionEnabled()) {
+        // Re-save once so any pre-upgrade plaintext contact files and name
+        // cache are encrypted immediately rather than waiting for the next
+        // dirty-triggered save. Cheap: contact count is capped at 50.
+        announceManager->saveContacts();
+        announceManager->saveNameCache();
+    }
 
     // Load user config (SD primary, flash fallback)
+    userConfig.setIdentity(&rns.identity());
     userConfig.load(sdStore, flash);
+    if (userConfig.encryptionEnabled()) {
+        // Re-save once so a pre-upgrade plaintext settings file is
+        // encrypted immediately — this is one small file, so it's cheap.
+        userConfig.save(sdStore, flash);
+    }
 
     // Seed default TCP hubs if no connections configured (off by default)
     if (userConfig.settings().tcpConnections.empty()) {

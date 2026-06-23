@@ -1,5 +1,6 @@
 #include "UserConfig.h"
 #include "config/BoardConfig.h"
+#include "storage/SettingsEncryption.h"
 #include <Preferences.h>
 
 // Legacy NVS namespace and key for full config backup.
@@ -10,11 +11,18 @@ static constexpr const char* NVS_KEY  = "json";
 // ---------------------------------------------------------------------------
 // NVS helpers — bulletproof config storage (internal flash, no SPI bus)
 // ---------------------------------------------------------------------------
+//
+// Stored via putBytes/getBytes (not putString/getString) because an
+// encrypted blob is binary and may contain embedded NUL bytes, which would
+// truncate a null-terminated PT_STR entry. Pre-encryption devices wrote
+// this key as a string (PT_STR); loadFromNVS() falls back to getString()
+// so those entries still come back intact on the first boot after upgrade,
+// at which point the next saveToNVS() call rewrites it as bytes.
 
-static bool saveToNVS(const String& json) {
+static bool saveToNVS(const String& raw) {
     Preferences prefs;
     if (!prefs.begin(NVS_NS, false)) return false;
-    bool ok = prefs.putString(NVS_KEY, json) > 0;
+    bool ok = prefs.putBytes(NVS_KEY, raw.c_str(), raw.length()) == raw.length();
     prefs.end();
     if (ok) Serial.println("[CONFIG] Saved to NVS");
     return ok;
@@ -23,9 +31,19 @@ static bool saveToNVS(const String& json) {
 static String loadFromNVS() {
     Preferences prefs;
     if (!prefs.begin(NVS_NS, true)) return "";
-    String json = prefs.getString(NVS_KEY, "");
+    String out;
+    size_t len = prefs.getBytesLength(NVS_KEY);
+    if (len > 0) {
+        std::vector<uint8_t> buf(len);
+        prefs.getBytes(NVS_KEY, buf.data(), len);
+        out.reserve(len);
+        for (size_t i = 0; i < len; i++) out.concat((char)buf[i]);
+    } else {
+        // Legacy PT_STR entry from a pre-encryption build.
+        out = prefs.getString(NVS_KEY, "");
+    }
     prefs.end();
-    return json;
+    return out;
 }
 
 static bool validLoRaFrequency(uint32_t freq) {
@@ -191,17 +209,45 @@ String UserConfig::serializeToJson() {
 }
 
 // ---------------------------------------------------------------------------
+// At-rest encryption helpers
+// ---------------------------------------------------------------------------
+
+// Wraps a JSON String in the at-rest envelope when an identity is
+// available. Mirrors MessageStore's maybeEncrypt/maybeDecrypt pattern.
+String UserConfig::maybeEncrypt(const String& json) const {
+    if (!_identity || !*_identity) return json;
+    String envelope;
+    if (SettingsEncryption::encryptString(*_identity, json, envelope)) {
+        return envelope;
+    }
+    Serial.println("[CONFIG] encrypt failed — writing plaintext fallback");
+    return json;
+}
+
+// Inverse of maybeEncrypt. Transparently passes through legacy plaintext
+// files (no magic header) so migration can be incremental. Returns false
+// if the blob is encrypted but no identity is available, or decryption
+// fails (wrong identity / tampered file).
+bool UserConfig::maybeDecrypt(const String& raw, String& out) const {
+    if (raw.length() == 0) { out = ""; return true; }
+    if (!SettingsEncryption::isEncrypted(raw)) { out = raw; return true; }  // legacy
+    if (!_identity || !*_identity) return false;
+    return SettingsEncryption::decryptOrPassthrough(*_identity, raw, out);
+}
+
+// ---------------------------------------------------------------------------
 // Flash-only (original API)
 // ---------------------------------------------------------------------------
 
 bool UserConfig::load(FlashStore& flash) {
     // Try flash file
-    String json = flash.readString(PATH_USER_CONFIG);
-    if (!json.isEmpty() && parseJson(json)) return true;
+    String raw = flash.readString(PATH_USER_CONFIG);
+    String json;
+    if (!raw.isEmpty() && maybeDecrypt(raw, json) && parseJson(json)) return true;
 
     // Fall back to NVS
-    json = loadFromNVS();
-    if (!json.isEmpty()) {
+    raw = loadFromNVS();
+    if (!raw.isEmpty() && maybeDecrypt(raw, json)) {
         Serial.println("[CONFIG] Recovered from NVS (flash file missing)");
         return parseJson(json);
     }
@@ -212,15 +258,16 @@ bool UserConfig::load(FlashStore& flash) {
 
 bool UserConfig::save(FlashStore& flash) {
     String json = serializeToJson();
+    String envelope = maybeEncrypt(json);
     bool ok = false;
 
-    if (flash.writeString(PATH_USER_CONFIG, json)) {
+    if (flash.writeString(PATH_USER_CONFIG, envelope)) {
         Serial.println("[CONFIG] Saved to flash");
         ok = true;
     }
 
     // Always save full config to NVS — bulletproof backup
-    saveToNVS(json);
+    saveToNVS(envelope);
 
     return ok;
 }
@@ -232,8 +279,9 @@ bool UserConfig::save(FlashStore& flash) {
 bool UserConfig::load(SDStore& sd, FlashStore& flash) {
     // Tier 1: SD card
     if (sd.isReady()) {
-        String json = sd.readString(SD_PATH_USER_CONFIG);
-        if (!json.isEmpty()) {
+        String raw = sd.readString(SD_PATH_USER_CONFIG);
+        String json;
+        if (!raw.isEmpty() && maybeDecrypt(raw, json)) {
             Serial.println("[CONFIG] Loading from SD card");
             if (parseJson(json)) return true;
         }
@@ -241,15 +289,16 @@ bool UserConfig::load(SDStore& sd, FlashStore& flash) {
 
     // Tier 2: Flash (LittleFS)
     {
-        String json = flash.readString(PATH_USER_CONFIG);
-        if (!json.isEmpty()) {
+        String raw = flash.readString(PATH_USER_CONFIG);
+        String json;
+        if (!raw.isEmpty() && maybeDecrypt(raw, json)) {
             Serial.println("[CONFIG] Loading from flash");
             if (parseJson(json)) {
                 // Auto-migrate to SD if available
                 if (sd.isReady()) {
                     sd.ensureDir("/ratcom");
                     sd.ensureDir("/ratcom/config");
-                    String migrateJson = serializeToJson();
+                    String migrateJson = maybeEncrypt(serializeToJson());
                     sd.writeString(SD_PATH_USER_CONFIG, migrateJson);
                     Serial.println("[CONFIG] Migrated to SD");
                 }
@@ -260,8 +309,9 @@ bool UserConfig::load(SDStore& sd, FlashStore& flash) {
 
     // Tier 3: NVS (bulletproof — survives flash corruption)
     {
-        String json = loadFromNVS();
-        if (!json.isEmpty()) {
+        String raw = loadFromNVS();
+        String json;
+        if (!raw.isEmpty() && maybeDecrypt(raw, json)) {
             Serial.println("[CONFIG] Recovered full config from NVS");
             if (parseJson(json)) {
                 // Re-save to SD/flash to heal the corruption
@@ -277,13 +327,14 @@ bool UserConfig::load(SDStore& sd, FlashStore& flash) {
 
 bool UserConfig::save(SDStore& sd, FlashStore& flash) {
     String json = serializeToJson();
+    String envelope = maybeEncrypt(json);
     bool ok = false;
 
     // Write to SD (primary)
     if (sd.isReady()) {
         sd.ensureDir("/ratcom");
         sd.ensureDir("/ratcom/config");
-        if (sd.writeString(SD_PATH_USER_CONFIG, json)) {
+        if (sd.writeString(SD_PATH_USER_CONFIG, envelope)) {
             Serial.println("[CONFIG] Saved to SD");
             ok = true;
         } else {
@@ -292,14 +343,14 @@ bool UserConfig::save(SDStore& sd, FlashStore& flash) {
     }
 
     // Write to flash (backup)
-    if (flash.writeString(PATH_USER_CONFIG, json)) {
+    if (flash.writeString(PATH_USER_CONFIG, envelope)) {
         Serial.println("[CONFIG] Saved to flash");
         ok = true;
     }
 
     // Always save full config to NVS — bulletproof backup
     // NVS is on internal flash, no SPI bus, wear-leveled, checksum-protected
-    if (saveToNVS(json)) ok = true;
+    if (saveToNVS(envelope)) ok = true;
 
     return ok;
 }
