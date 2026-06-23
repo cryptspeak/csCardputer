@@ -9,6 +9,7 @@
 [![Encryption](https://img.shields.io/badge/at--rest-AES--256--CTR%20%2B%20HMAC-success.svg)](#cryptspeak--what-changed)
 [![License](https://img.shields.io/badge/license-mixed-blue.svg)](#credits--license)
 
+[Web Flasher](https://0x00001312.github.io/CryptspeakFlasher/) |
 [Ratspeak](https://github.com/ratspeak/Ratspeak) |
 [rsReticulum](https://github.com/ratspeak/rsReticulum) |
 [rsLXMF](https://github.com/ratspeak/rsLXMF) |
@@ -190,7 +191,13 @@ The supported Cardputer Adv has:
 
 ## Flashing
 
-This repository builds only the standalone firmware. To flash the device, build and upload manually with PlatformIO as described in [Build From Source](#build-from-source).
+This repository builds only the standalone firmware. The easiest way to flash it is the
+[Cryptspeak Web Flasher](https://0x00001312.github.io/CryptspeakFlasher/) — it flashes
+pre-built release firmware straight from your browser (Chrome/Edge, via WebSerial) over
+USB, no local toolchain required.
+
+Alternatively, build and upload manually with PlatformIO as described in
+[Build From Source](#build-from-source).
 
 ## Radio Presets
 
