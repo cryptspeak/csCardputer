@@ -10,10 +10,7 @@
 [![License](https://img.shields.io/badge/license-mixed-blue.svg)](#credits--license)
 
 [Web Flasher](https://0x00001312.github.io/CryptspeakFlasher/) |
-[Ratspeak](https://github.com/ratspeak/Ratspeak) |
-[rsReticulum](https://github.com/ratspeak/rsReticulum) |
-[rsLXMF](https://github.com/ratspeak/rsLXMF) |
-[Downloads](https://ratspeak.org/download.html)
+[Ratspeak](https://github.com/ratspeak/Ratspeak)
 
 </div>
 
