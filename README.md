@@ -172,6 +172,12 @@ encryption design and the rest of the firmware's architecture:
 | [docs/threat-model.md](docs/threat-model.md) | What this defends against, and what it explicitly doesn't |
 | [docs/firmware-architecture.md](docs/firmware-architecture.md) | Directory layout and how the major modules fit together |
 | [docs/storage-layer.md](docs/storage-layer.md) | `FlashStore`/`SDStore`/`WriteQueue` — the storage tiers everything else is built on |
+| [docs/reticulum-integration.md](docs/reticulum-integration.md) | `ReticulumManager` — endpoint config, announce-flood defense, the background persist task |
+| [docs/lxmf-messaging.md](docs/lxmf-messaging.md) | LXMF send/receive flow, delivery proofs, on-disk message format and capacity limits |
+| [docs/announce-discovery.md](docs/announce-discovery.md) | Peer discovery, app_data name parsing, contacts vs. the name cache |
+| [docs/network-interfaces.md](docs/network-interfaces.md) | LoRa/WiFi/TCP/AutoInterface/BLE interfaces and the SX1262 radio driver |
+| [docs/hardware-platform.md](docs/hardware-platform.md) | GPS, keyboard/hotkeys, power, audio, the launcher partition switch, pin reference |
+| [docs/ui-framework.md](docs/ui-framework.md) | The screen/widget framework, dirty-flag rendering, input routing |
 
 ## Hardware
 

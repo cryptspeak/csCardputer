@@ -42,7 +42,14 @@ src/
   unlocked yet" — everything that needs at-rest encryption (`MessageStore`,
   `AnnounceManager`, `UserConfig`) takes a `const RNS::Identity*` pointer
   from it via a `setIdentity()` call once it's available. See
-  [boot-sequence.md](boot-sequence.md) for the exact ordering.
+  [boot-sequence.md](boot-sequence.md) for the exact ordering and
+  [reticulum-integration.md](reticulum-integration.md) for everything
+  else `ReticulumManager` does (endpoint config, announce-flood defense,
+  the background persist task).
+- **`LXMFManager`** is the send/receive state machine sitting on top of
+  `ReticulumManager`'s destination; **`AnnounceManager`** is the
+  discovery/contacts side. See [lxmf-messaging.md](lxmf-messaging.md)
+  and [announce-discovery.md](announce-discovery.md).
 - **`FlashStore`/`SDStore`** are the only things that touch the
   filesystem directly. Every higher-level module (`MessageStore`,
   `AnnounceManager`, `UserConfig`) reads/writes through one of these two,
@@ -54,10 +61,17 @@ src/
   `IdentityCrypto` is separate because it derives its key from a
   password via PBKDF2 instead of from the identity via HKDF — see
   [encryption-overview.md](encryption-overview.md).
+- **`transport/` + `radio/`** implement the actual `RNS::Interface`s
+  (LoRa, WiFi, TCP, AutoInterface, the BLE stub) and the SX1262 driver
+  underneath LoRa. See [network-interfaces.md](network-interfaces.md).
+- **`hal/`, `input/`, `power/`, `audio/`, `platform/`** are board-level
+  glue with no Reticulum or storage knowledge of their own. See
+  [hardware-platform.md](hardware-platform.md).
 - **UI screens** (`src/ui/screens/`) are largely independent and talk to
   the managers above through narrow setter/getter APIs
   (`setUserConfig()`, `setIdentityHash()`, etc.) rather than reaching into
-  storage directly.
+  storage directly. See [ui-framework.md](ui-framework.md) for the
+  framework they're built on.
 
 ## Build
 
