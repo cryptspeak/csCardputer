@@ -72,6 +72,10 @@ bool Keyboard::pollHardware() {
     return true;
 }
 
+bool Keyboard::isKeyPressed(char c) const {
+    return M5Cardputer.Keyboard.isKeyPressed(c);
+}
+
 bool Keyboard::capsLocked() const {
     return M5Cardputer.Keyboard.capslocked();
 }

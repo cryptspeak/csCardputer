@@ -982,6 +982,14 @@ void setup() {
     Serial.printf("[BOOT] Free heap: %lu, min ever: %lu\n",
                   (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap());
 
+    // Mount flash early (before UI) purely so a saved theme.json can be
+    // applied before the very first frame is drawn. FlashStore::begin() is
+    // idempotent — the existing mount call later in setup() just confirms
+    // the same state and still drives its own boot-screen progress step.
+    // This does not move or affect the identity-at-rest gate ordering.
+    flash.begin();
+    Theme::load(&flash, nullptr);
+
     // Initialize UI + boot screen
     ui.begin();
     ui.setBootMode(true);
@@ -1066,6 +1074,13 @@ void setup() {
         sdStore.ensureDir("/ratcom/messages");
         sdStore.ensureDir("/ratcom/contacts");
         sdStore.ensureDir("/ratcom/identity");
+        sdStore.ensureDir("/ratcom/config");
+        // SD takes priority over flash for theme, same as other config —
+        // re-check now that it's mounted (it wasn't ready for the earlier,
+        // flash-only Theme::load() before ui.begin()).
+        if (Theme::load(&flash, &sdStore)) {
+            ui.refreshPalette();
+        }
         bootScreen.setProgress(0.68f, "SD card ready");
     } else {
         bootScreen.setProgress(0.68f, "No SD card");
@@ -1342,6 +1357,8 @@ void setup() {
     settingsScreen.setUserConfig(&userConfig);
     settingsScreen.setFlashStore(&flash);
     settingsScreen.setSDStore(&sdStore);
+    settingsScreen.setUIManager(&ui);
+    settingsScreen.setKeyboard(&keyboard);
     settingsScreen.setRadio(&radio);
     settingsScreen.setAudio(&audio);
     settingsScreen.setPower(&power);
@@ -1498,6 +1515,12 @@ void loop() {
 
     // 1. Input (keyboard refresh is INT-gated, with fallback polling)
     keyboard.update();
+
+    // Continuous per-screen polling (accelerating hold-to-repeat controls,
+    // etc.) — independent of the throttled render below. Placed right after
+    // keyboard.update() so it reads this iteration's freshest key state.
+    ui.tick();
+
     if (keyboard.hasEvent()) {
         const KeyEvent& evt = keyboard.getEvent();
         power.activity();

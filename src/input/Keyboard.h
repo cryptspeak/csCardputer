@@ -37,6 +37,13 @@ public:
     bool hasEvent() const { return _hasEvent; }
     const KeyEvent& getEvent() const { return _event; }
 
+    // Continuous (level, not edge) check — true for as long as the key is
+    // physically held, independent of the one-shot KeyEvent dispatch above.
+    // For UI that needs to know "is this key still down" between presses
+    // (e.g. an accelerating hold-to-repeat control), not just "was it just
+    // pressed."
+    bool isKeyPressed(char c) const;
+
     // For text input mode
     bool capsLocked() const;
     void setCapsLocked(bool locked);

@@ -1,9 +1,19 @@
 #pragma once
 
 #include <M5GFX.h>
+#include <Arduino.h>
+
+class FlashStore;
+class SDStore;
 
 // =============================================================================
 // rsCardputer — compact field-console theme
+//
+// Colors below are runtime-mutable (not constexpr) so a user-selected theme
+// can override them at boot, but every symbol keeps its original name and
+// type — every existing call site (Theme::PRIMARY, etc.) keeps working
+// unchanged. Defaults match the original hand-tuned palette exactly; custom
+// themes only take effect after Theme::load() runs and replaces these.
 // =============================================================================
 
 namespace Theme {
@@ -12,31 +22,76 @@ constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
-// --- Colors (RGB565) ---
-constexpr uint16_t BG             = rgb565(5, 8, 10);
-constexpr uint16_t BG_ELEVATED    = rgb565(12, 20, 24);
-constexpr uint16_t BG_SURFACE     = rgb565(18, 29, 35);
-constexpr uint16_t BG_HOVER       = rgb565(24, 48, 51);
-constexpr uint16_t TEXT_PRIMARY   = rgb565(228, 243, 240);
-constexpr uint16_t TEXT_SECONDARY = rgb565(145, 168, 165);
-constexpr uint16_t TEXT_MUTED     = rgb565(82, 104, 102);
-constexpr uint16_t PRIMARY        = rgb565(0, 224, 109);
-constexpr uint16_t PRIMARY_MUTED  = rgb565(0, 168, 83);
-constexpr uint16_t PRIMARY_SUBTLE = rgb565(6, 37, 26);
-constexpr uint16_t SECONDARY      = TEXT_SECONDARY;
-constexpr uint16_t MUTED          = TEXT_MUTED;
-constexpr uint16_t SUCCESS        = rgb565(49, 233, 129);
-constexpr uint16_t ERROR          = rgb565(255, 92, 108);
-constexpr uint16_t WARNING        = rgb565(240, 192, 79);
-constexpr uint16_t ACCENT         = rgb565(79, 215, 255);
-constexpr uint16_t BORDER         = rgb565(33, 56, 59);
-constexpr uint16_t DIVIDER        = rgb565(16, 35, 41);
-constexpr uint16_t SELECTION_BG   = PRIMARY_SUBTLE;
-constexpr uint16_t BAR_BG         = rgb565(7, 16, 20);
-constexpr uint16_t TAB_ACTIVE     = TEXT_PRIMARY;
-constexpr uint16_t TAB_INACTIVE   = TEXT_SECONDARY;
-constexpr uint16_t BADGE_BG       = ERROR;
-constexpr uint16_t BADGE_TEXT     = BG;
+// --- Colors (RGB565) — mutable, see Theme.cpp for defaults ---
+extern uint16_t BG;
+extern uint16_t BG_ELEVATED;
+extern uint16_t BG_SURFACE;
+extern uint16_t BG_HOVER;
+extern uint16_t TEXT_PRIMARY;
+extern uint16_t TEXT_SECONDARY;
+extern uint16_t TEXT_MUTED;
+extern uint16_t PRIMARY;
+extern uint16_t PRIMARY_MUTED;
+extern uint16_t PRIMARY_SUBTLE;
+extern uint16_t SECONDARY;
+extern uint16_t MUTED;
+extern uint16_t SUCCESS;
+extern uint16_t ERROR;
+extern uint16_t WARNING;
+extern uint16_t ACCENT;
+extern uint16_t BORDER;
+extern uint16_t DIVIDER;
+extern uint16_t SELECTION_BG;
+extern uint16_t BAR_BG;
+extern uint16_t TAB_ACTIVE;
+extern uint16_t TAB_INACTIVE;
+extern uint16_t BADGE_BG;
+extern uint16_t BADGE_TEXT;
+
+// --- Custom theme support ---
+// The 7 base hues a user can edit; every other color above is derived from
+// these (see Theme.cpp). Stored/edited as 6-digit hex strings ("RRGGBB").
+struct BaseColors {
+    String name = "Default";
+    String bg, text, primary, secondary, accent, error, warning;
+};
+
+struct Preset {
+    const char* name;
+    const char* bg, *text, *primary, *secondary, *accent, *error, *warning;
+};
+
+extern const Preset PRESETS[];
+extern const int PRESET_COUNT;
+
+// Current base colors (for the settings UI to display/edit).
+BaseColors current();
+
+// Validates each hex field (must be exactly 6 hex digits; invalid fields
+// fall back to the current value for that field only) and applies +
+// derives the full palette. Does not save to disk.
+void apply(const BaseColors& colors);
+
+// Restores the compiled-in default palette exactly (bypasses derivation).
+void resetToDefaults();
+
+// Index into PRESETS, or -1 if the active colors don't match any preset
+// (i.e. a custom theme is active).
+int activePresetIndex();
+
+// Loads theme.json from SD (if ready) else flash, validates, and applies.
+// Safe to call with sd == nullptr (flash-only, used early at boot before
+// the SD card is mounted) and safe to call again later once SD is ready —
+// a second call re-applies whichever tier currently has a saved theme.
+// Never reads identity/encryption state: the theme file is intentionally
+// plaintext, since it carries no sensitive information and the boot/lock
+// screens need it before the user unlocks anything.
+// Returns true if a saved theme was found and applied (false = defaults).
+bool load(FlashStore* flash, SDStore* sd);
+
+// Persists the current colors as plaintext JSON to flash, and to SD too
+// if it's ready.
+bool save(FlashStore* flash, SDStore* sd);
 
 // --- Layout Metrics ---
 constexpr int SCREEN_W       = 240;

@@ -2,9 +2,66 @@
 #include "ui/Theme.h"
 #include "config/Config.h"
 #include <algorithm>
+#include <cctype>
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+
+// Strict: exactly 6 hex digits, nothing else. Used to drive the live color
+// swatch while editing a Theme > Custom field — only renders once the typed
+// text is a complete, valid hex value.
+static bool parseHex6(const std::string& s, uint8_t& r, uint8_t& g, uint8_t& b) {
+    if (s.size() != 6) return false;
+    for (char c : s) {
+        if (!isxdigit((unsigned char)c)) return false;
+    }
+    long v = strtol(s.c_str(), nullptr, 16);
+    r = (uint8_t)((v >> 16) & 0xFF);
+    g = (uint8_t)((v >> 8) & 0xFF);
+    b = (uint8_t)(v & 0xFF);
+    return true;
+}
+
+// Single source of truth for the Theme > Custom field list: display order,
+// label, and which Theme::BaseColors member each row actually edits.
+// `index` matches the field argument used throughout this file (startMixer,
+// commitEdit, getCurrentValue, commitMixer) — those stay in BaseColors'
+// declaration order (bg, text, primary, secondary, accent, error, warning);
+// only the on-screen order/labels are reshuffled here, in one place, so menu
+// order and field plumbing can never drift out of sync with each other.
+// Grouped by what a user is actually looking at: surface/text colors first,
+// then the two "emphasis" colors (selection vs. screen-header chrome), then
+// status colors in ascending severity (warn before error).
+struct ThemeFieldInfo { int index; const char* label; };
+static const ThemeFieldInfo kThemeFields[7] = {
+    {0, "Background"},  // bg
+    {1, "Text"},         // text
+    {3, "Subtext"},      // secondary
+    {2, "Highlight"},    // primary
+    {4, "Header"},       // accent
+    {6, "Warning"},      // warning
+    {5, "Error"},        // error
+};
+
+static std::string hexForBaseField(const Theme::BaseColors& c, int fieldIndex) {
+    switch (fieldIndex) {
+        case 0: return std::string(c.bg.c_str());
+        case 1: return std::string(c.text.c_str());
+        case 2: return std::string(c.primary.c_str());
+        case 3: return std::string(c.secondary.c_str());
+        case 4: return std::string(c.accent.c_str());
+        case 5: return std::string(c.error.c_str());
+        case 6: return std::string(c.warning.c_str());
+        default: return std::string();
+    }
+}
+
+static const char* labelForBaseField(int fieldIndex) {
+    for (const auto& f : kThemeFields) {
+        if (f.index == fieldIndex) return f.label;
+    }
+    return "Color";
+}
 
 void SettingsScreen::onEnter() {
     _subMenu = MENU_MAIN;
@@ -24,56 +81,12 @@ void SettingsScreen::buildMainMenu() {
     _list.addItem("Factory Reset", Theme::ERROR);
 }
 
-struct RadioPreset {
-    const char* name;
-    uint8_t sf; uint32_t bw; uint8_t cr; int8_t txPower;
-};
-static const RadioPreset PRESETS[] = {
-    {"Short Turbo",   7,  500000, 5,  14},
-    {"Short Fast",    7,  250000, 5,  14},
-    {"Short Slow",    8,  250000, 5,  14},
-    {"Medium Fast",   9,  250000, 5,  17},
-    {"Medium Slow",   10, 250000, 5,  17},
-    {"Long Turbo",    11, 500000, 8,  LORA_MAX_TX_POWER},
-    {"Long Fast",     11, 250000, 5,  LORA_MAX_TX_POWER},
-    {"Long Moderate", 11, 125000, 8,  LORA_MAX_TX_POWER},
-};
-static constexpr int NUM_PRESETS = 8;
-
-static int detectPresetIndex(const UserSettings& s) {
-    for (int i = 0; i < NUM_PRESETS; i++) {
-        if (s.loraSF == PRESETS[i].sf && s.loraBW == PRESETS[i].bw
-            && s.loraCR == PRESETS[i].cr && s.loraTxPower == PRESETS[i].txPower)
-            return i;
-    }
-    return -1;
-}
-
-static const char* detectPresetName(const UserSettings& s) {
-    int idx = detectPresetIndex(s);
-    return idx >= 0 ? PRESETS[idx].name : "Custom";
-}
-
 void SettingsScreen::buildRadioMenu() {
     _list.clear();
     if (!_config) return;
     auto& s = _config->settings();
     char buf[40];
 
-    // Active preset indicator
-    snprintf(buf, sizeof(buf), "Active: %s", detectPresetName(s));
-    _list.addItem(buf);
-
-    // Presets (items 1..NUM_PRESETS)
-    int activeIdx = detectPresetIndex(s);
-    for (int i = 0; i < NUM_PRESETS; i++) {
-        char label[40];
-        snprintf(label, sizeof(label), "%s[%s]",
-                 (i == activeIdx) ? ">" : " ", PRESETS[i].name);
-        _list.addItem(label, (i == activeIdx) ? Theme::PRIMARY : 0);
-    }
-
-    // Editable fields (items NUM_PRESETS+1 .. NUM_PRESETS+5)
     snprintf(buf, sizeof(buf), "Frequency: %lu Hz", (unsigned long)s.loraFrequency);
     _list.addItem(buf);
     snprintf(buf, sizeof(buf), "SF: %d", s.loraSF);
@@ -359,6 +372,18 @@ void SettingsScreen::buildDisplayMenu() {
     _list.clear();
     if (!_config) return;
     auto& s = _config->settings();
+
+    _list.addItem("Screen");
+    _list.addItem("Theme");
+    String name = s.displayName.isEmpty() ? "(none)" : s.displayName;
+    _list.addItem("Name: " + std::string(name.c_str()));
+    _list.addItem("< Back");
+}
+
+void SettingsScreen::buildDisplayScreenMenu() {
+    _list.clear();
+    if (!_config) return;
+    auto& s = _config->settings();
     char buf[40];
 
     snprintf(buf, sizeof(buf), "Brightness: %d", s.brightness);
@@ -367,9 +392,6 @@ void SettingsScreen::buildDisplayMenu() {
     _list.addItem(buf);
     snprintf(buf, sizeof(buf), "Off timeout: %ds", s.screenOffTimeout);
     _list.addItem(buf);
-
-    String name = s.displayName.isEmpty() ? "(none)" : s.displayName;
-    _list.addItem(("Name: " + std::string(name.c_str())));
     _list.addItem("< Back");
 }
 
@@ -385,14 +407,149 @@ void SettingsScreen::buildAudioMenu() {
     _list.addItem("< Back");
 }
 
-// Start editing a field — show TextInput with current value
-void SettingsScreen::startEditing(int field, const std::string& currentValue) {
+// =============================================================================
+// Theme submenu — presets, plus per-hue hex editing for a custom theme.
+// Colors live in their own plaintext theme.json (see docs/theme-config.md),
+// not in the encrypted UserConfig blob — they aren't sensitive, and the
+// boot/password screens need a theme before any identity is unlocked.
+// =============================================================================
+
+void SettingsScreen::buildThemeMenu() {
+    _list.clear();
+    char buf[40];
+
+    Theme::BaseColors c = Theme::current();
+    snprintf(buf, sizeof(buf), "Active: %s", c.name.c_str());
+    _list.addItem(buf);
+
+    int activeIdx = Theme::activePresetIndex();
+    for (int i = 0; i < Theme::PRESET_COUNT; i++) {
+        char label[40];
+        snprintf(label, sizeof(label), "%s[%s]",
+                 (i == activeIdx) ? ">" : " ", Theme::PRESETS[i].name);
+        _list.addItem(label, (i == activeIdx) ? Theme::PRIMARY : 0);
+    }
+
+    // "Custom" is a selectable row in the same list as the presets above —
+    // not a separate menu link — so it reads as one more option to pick,
+    // not a different kind of action. Selecting it opens the per-hue editor.
+    char customLabel[40];
+    snprintf(customLabel, sizeof(customLabel), "%s[Custom]", (activeIdx < 0) ? ">" : " ");
+    _list.addItem(customLabel, (activeIdx < 0) ? Theme::PRIMARY : 0);
+    _list.addItem("< Back");
+}
+
+void SettingsScreen::applyThemePreset(int index) {
+    if (index < 0 || index >= Theme::PRESET_COUNT) return;
+    const Theme::Preset& p = Theme::PRESETS[index];
+
+    Theme::BaseColors c;
+    c.name = p.name;
+    c.bg = p.bg; c.text = p.text; c.primary = p.primary;
+    c.secondary = p.secondary; c.accent = p.accent;
+    c.error = p.error; c.warning = p.warning;
+
+    Theme::apply(c);
+    Theme::save(_flash, _sdStore);
+    if (_ui) _ui->refreshPalette();
+    buildThemeMenu();
+    showToast("Theme applied!");
+}
+
+void SettingsScreen::buildThemeCustomMenu() {
+    _list.clear();
+    Theme::BaseColors c = Theme::current();
+
+    // Optional alternative to typing hex directly — toggled here, applies to
+    // whichever hue you pick below. Defaults to Hex (fastest); Mix opens an
+    // RGB slider screen instead.
+    _list.addItem(_useMixer ? "Input: Mix" : "Input: Hex");
+
+    for (const auto& f : kThemeFields) {
+        _list.addItem(std::string(f.label) + ": " + hexForBaseField(c, f.index));
+    }
+    _list.addItem("< Back");
+}
+
+// Seed the mixer's working R/G/B from the field's current hex value.
+void SettingsScreen::startMixer(int field) {
+    Theme::BaseColors c = Theme::current();
+    std::string hex = hexForBaseField(c, field);
+    uint8_t r, g, b;
+    if (!parseHex6(hex, r, g, b)) { r = g = b = 0; }
+    _mixerField = field;
+    _mixerChannel = 0;
+    _mixerR = r; _mixerG = g; _mixerB = b;
+    _mixerHeldKey = 0;
+    _mixerHeldSince = 0;
+    _mixerLastStepAt = 0;
+    _subMenu = MENU_THEME_MIXER;
+}
+
+// How far a single nudge moves the selected channel, given how long the key
+// has been held. The UI canvas renders at 8bpp truecolor (3 red bits, 3
+// green bits, 2 blue bits — not an indexed palette, despite
+// setPaletteColor() calls elsewhere suggesting otherwise), so a fixed step
+// of 1 can sit inside the same quantization bucket for up to 31 (R/G) or 63
+// (B) consecutive presses with no visible color change at all. The step
+// only needs to be big enough that a few presses' worth of *accumulated*
+// movement crosses a bucket within a fraction of a second — it doesn't
+// need to guarantee a new bucket on every single press, which is what made
+// the first version of this ramp feel like it was teleporting. Kept
+// deliberately gentle: a tap (or the very start of a hold) still moves by
+// exactly 1 for precise, ungapped adjustment, and even at full cruise the
+// step is a fraction of a bucket width, not a whole one.
+static int mixerStepSize(int channel, unsigned long held) {
+    if (held < 500) return 1;
+    int unit = (channel == 2) ? 2 : 1;  // blue's bucket is 2x wider than red/green's
+    if (held < 1500) return 2 * unit;
+    if (held < 3000) return 4 * unit;
+    return 8 * unit;
+}
+
+// Nudge whichever channel is currently selected, by `amount` (signed).
+void SettingsScreen::stepMixerChannel(int amount) {
+    uint8_t* chan = (_mixerChannel == 0) ? &_mixerR : (_mixerChannel == 1) ? &_mixerG : &_mixerB;
+    int v = (int)*chan + amount;
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+    *chan = (uint8_t)v;
+    if (_ui) _ui->markContentDirty();
+}
+
+void SettingsScreen::commitMixer() {
+    char hexBuf[7];
+    snprintf(hexBuf, sizeof(hexBuf), "%02X%02X%02X", _mixerR, _mixerG, _mixerB);
+    Theme::BaseColors c = Theme::current();
+    c.name = "Custom";
+    switch (_mixerField) {
+        case 0: c.bg = hexBuf; break;
+        case 1: c.text = hexBuf; break;
+        case 2: c.primary = hexBuf; break;
+        case 3: c.secondary = hexBuf; break;
+        case 4: c.accent = hexBuf; break;
+        case 5: c.error = hexBuf; break;
+        case 6: c.warning = hexBuf; break;
+    }
+    Theme::apply(c);
+    Theme::save(_flash, _sdStore);
+    if (_ui) _ui->refreshPalette();
+    showToast("Saved!");
+    _subMenu = MENU_THEME_CUSTOM;
+    buildThemeCustomMenu();
+}
+
+// Start editing a field — show TextInput with current value. `label`
+// replaces the generic "Edit value:" prompt; always set explicitly (even to
+// "") so a label from a previous edit never leaks into the next one.
+void SettingsScreen::startEditing(int field, const std::string& currentValue, const std::string& label) {
     _editField = field;
     _editing = true;
+    _editLabel = label;
     _editInput.clear();
     _editInput.setText(currentValue);
     _editInput.setActive(true);
-    _editInput.setMaxLength(64);
+    _editInput.setMaxLength(_subMenu == MENU_THEME_CUSTOM ? 6 : 64);
     _editInput.setSubmitCallback([this](const std::string& value) {
         commitEdit(value);
     });
@@ -474,6 +631,10 @@ void SettingsScreen::commitEdit(const std::string& value) {
         }
         buildWiFiMenu();
     } else if (_subMenu == MENU_DISPLAY) {
+        if (_editField == 0) s.displayName = value.c_str();
+        applyAndSave();
+        buildDisplayMenu();
+    } else if (_subMenu == MENU_DISPLAY_SCREEN) {
         switch (_editField) {
             case 0: {
                 int v = atoi(value.c_str());
@@ -485,10 +646,9 @@ void SettingsScreen::commitEdit(const std::string& value) {
             }
             case 1: s.screenDimTimeout = (uint16_t)atoi(value.c_str()); break;
             case 2: s.screenOffTimeout = (uint16_t)atoi(value.c_str()); break;
-            case 3: s.displayName = value.c_str(); break;
         }
         applyAndSave();
-        buildDisplayMenu();
+        buildDisplayScreenMenu();
     } else if (_subMenu == MENU_AUDIO) {
         if (_editField == 1) {
             int v = atoi(value.c_str());
@@ -499,6 +659,38 @@ void SettingsScreen::commitEdit(const std::string& value) {
         }
         applyAndSave();
         buildAudioMenu();
+    } else if (_subMenu == MENU_THEME_CUSTOM) {
+        // Exactly 6 hex digits or reject outright (previous color kept) —
+        // no silent coercion of a malformed/truncated value.
+        bool valid = value.size() == 6;
+        for (size_t i = 0; valid && i < value.size(); i++) {
+            valid = isxdigit((unsigned char)value[i]);
+        }
+        if (!valid) {
+            showToast("Use 6 hex digits (RRGGBB)");
+            _editing = false;
+            _editField = -1;
+            return;
+        }
+        std::string hex = value;
+        for (auto& ch : hex) ch = (char)toupper((unsigned char)ch);
+
+        Theme::BaseColors c = Theme::current();
+        c.name = "Custom";
+        switch (_editField) {
+            case 0: c.bg = hex.c_str(); break;
+            case 1: c.text = hex.c_str(); break;
+            case 2: c.primary = hex.c_str(); break;
+            case 3: c.secondary = hex.c_str(); break;
+            case 4: c.accent = hex.c_str(); break;
+            case 5: c.error = hex.c_str(); break;
+            case 6: c.warning = hex.c_str(); break;
+        }
+        Theme::apply(c);
+        Theme::save(_flash, _sdStore);
+        if (_ui) _ui->refreshPalette();
+        showToast("Saved!");
+        buildThemeCustomMenu();
     }
 
     _editing = false;
@@ -532,14 +724,17 @@ std::string SettingsScreen::getCurrentValue(SubMenu menu, int field) {
             }
         }
     } else if (menu == MENU_DISPLAY) {
+        if (field == 0) return s.displayName.c_str();
+    } else if (menu == MENU_DISPLAY_SCREEN) {
         switch (field) {
             case 0: snprintf(buf, sizeof(buf), "%d", s.brightness); return buf;
             case 1: snprintf(buf, sizeof(buf), "%d", s.screenDimTimeout); return buf;
             case 2: snprintf(buf, sizeof(buf), "%d", s.screenOffTimeout); return buf;
-            case 3: return s.displayName.c_str();
         }
     } else if (menu == MENU_AUDIO) {
         if (field == 1) { snprintf(buf, sizeof(buf), "%d", s.audioVolume); return buf; }
+    } else if (menu == MENU_THEME_CUSTOM) {
+        return hexForBaseField(Theme::current(), field);
     }
     return "";
 }
@@ -554,7 +749,8 @@ void SettingsScreen::render(M5Canvas& canvas) {
 
     // Header with accent bar
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
-                             "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN"};
+                             "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN", "THEME",
+                             "SCREEN", "CUSTOM THEME", "MIX COLOR"};
     const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
@@ -564,7 +760,9 @@ void SettingsScreen::render(M5Canvas& canvas) {
     canvas.drawFastHLine(0, y0 + headerH, Theme::CONTENT_W, Theme::DIVIDER);
     Theme::useSmallFont(canvas);
 
-    if (_editing) {
+    if (_subMenu == MENU_THEME_MIXER) {
+        renderMixer(canvas, y0, headerH);
+    } else if (_editing) {
         // Show field name
         canvas.setTextColor(Theme::MUTED);
         std::string label = _editLabel.empty() ? "Edit value:" : _editLabel;
@@ -573,9 +771,22 @@ void SettingsScreen::render(M5Canvas& canvas) {
         // Show text input
         _editInput.render(canvas, 0, y0 + headerH + 19, Theme::CONTENT_W);
 
-        // Hint
-        canvas.setTextColor(Theme::MUTED);
-        canvas.drawString("Enter=save  Esc=cancel", 4, y0 + headerH + 36);
+        if (_subMenu == MENU_THEME_CUSTOM) {
+            // Live swatch — fills in the moment a valid 6-digit hex value is
+            // typed, updates on every further keystroke. No instructional
+            // text needed: typing a hex code and pressing Enter is the same
+            // interaction as every other field in Settings.
+            uint8_t r, g, b;
+            if (parseHex6(_editInput.getText(), r, g, b)) {
+                int sy = y0 + headerH + 35;
+                uint16_t swatch = Theme::rgb565(r, g, b);
+                canvas.fillRect(4, sy, 28, 16, swatch);
+                canvas.drawRect(4, sy, 28, 16, Theme::BORDER);
+            }
+        } else {
+            canvas.setTextColor(Theme::MUTED);
+            canvas.drawString("Enter=save  Esc=cancel", 4, y0 + headerH + 36);
+        }
     } else {
         _list.render(canvas, 0, y0 + headerH + 2, Theme::CONTENT_W,
                      Theme::CONTENT_H - headerH - 3);
@@ -610,6 +821,47 @@ void SettingsScreen::render(M5Canvas& canvas) {
     } else {
         _toastMessage = nullptr;
     }
+}
+
+void SettingsScreen::renderMixer(M5Canvas& canvas, int y0, int headerH) {
+    const char* fieldName = labelForBaseField(_mixerField);
+
+    int y = y0 + headerH + 4;
+    canvas.setTextColor(Theme::ACCENT);
+    canvas.drawString(fieldName, 4, y);
+    y += 13;
+
+    const char* chLabels[3] = {"R", "G", "B"};
+    uint8_t chVals[3] = {_mixerR, _mixerG, _mixerB};
+    const int barX = 16, barW = 130, barH = 9;
+
+    for (int i = 0; i < 3; i++) {
+        bool sel = (_mixerChannel == i);
+        canvas.setTextColor(sel ? Theme::PRIMARY : Theme::TEXT_SECONDARY);
+        canvas.drawString(chLabels[i], 4, y + 1);
+
+        canvas.drawRect(barX, y, barW, barH, sel ? Theme::PRIMARY : Theme::BORDER);
+        int fillW = (barW - 2) * chVals[i] / 255;
+        if (fillW > 0) {
+            canvas.fillRect(barX + 1, y + 1, fillW, barH - 2, sel ? Theme::PRIMARY : Theme::TEXT_MUTED);
+        }
+
+        char valBuf[8];
+        snprintf(valBuf, sizeof(valBuf), "%3d", chVals[i]);
+        canvas.setTextColor(sel ? Theme::PRIMARY : Theme::TEXT_SECONDARY);
+        canvas.drawString(valBuf, barX + barW + 6, y + 1);
+
+        y += barH + 4;
+    }
+
+    y += 3;
+    uint16_t swatch = Theme::rgb565(_mixerR, _mixerG, _mixerB);
+    canvas.fillRect(4, y, 28, 16, swatch);
+    canvas.drawRect(4, y, 28, 16, Theme::BORDER);
+    char hexBuf[8];
+    snprintf(hexBuf, sizeof(hexBuf), "#%02X%02X%02X", _mixerR, _mixerG, _mixerB);
+    canvas.setTextColor(Theme::TEXT_SECONDARY);
+    canvas.drawString(hexBuf, 38, y + 4);
 }
 
 void SettingsScreen::renderAbout(M5Canvas& canvas) {
@@ -674,6 +926,35 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
         return true;
     }
 
+    // RGB mixer (Theme > Custom > Input: Mix > <field>) — owns input while
+    // active. ';'/'.' switch channel, Enter saves, Esc/Del cancels. ','/'/'
+    // apply one immediate step here (tap = single nudge); a sustained hold
+    // is picked up by tick() polling continuous key state, which is what
+    // actually accelerates — see Keyboard::isKeyPressed().
+    if (_subMenu == MENU_THEME_MIXER) {
+        if (event.character == 27 || event.del) {
+            _mixerHeldKey = 0;
+            _subMenu = MENU_THEME_CUSTOM;
+            buildThemeCustomMenu();
+            return true;
+        }
+        if (event.enter) {
+            _mixerHeldKey = 0;
+            commitMixer();
+            return true;
+        }
+        if (event.character == ';') { _mixerChannel = (_mixerChannel + 2) % 3; return true; }
+        if (event.character == '.') { _mixerChannel = (_mixerChannel + 1) % 3; return true; }
+        if (event.character == ',' || event.character == '/') {
+            stepMixerChannel(event.character == ',' ? -1 : 1);  // tap = exact, ungapped single step
+            _mixerHeldKey = event.character;
+            _mixerHeldSince = millis();
+            _mixerLastStepAt = _mixerHeldSince;
+            return true;
+        }
+        return true;  // swallow anything else while the mixer is active
+    }
+
     // ESC or Delete goes back
     if (event.character == 27 || (event.del && !_editing)) {
         if (_editing) {
@@ -691,6 +972,16 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
         if (_subMenu == MENU_WIFI_SCAN) {
             _subMenu = MENU_WIFI;
             buildWiFiMenu();
+            return true;
+        }
+        if (_subMenu == MENU_DISPLAY_SCREEN || _subMenu == MENU_THEME) {
+            _subMenu = MENU_DISPLAY;
+            buildDisplayMenu();
+            return true;
+        }
+        if (_subMenu == MENU_THEME_CUSTOM) {
+            _subMenu = MENU_THEME;
+            buildThemeMenu();
             return true;
         }
         if (_subMenu != MENU_MAIN) {
@@ -766,6 +1057,12 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             if (_subMenu == MENU_TCP) {
                 _subMenu = MENU_WIFI;
                 buildWiFiMenu();
+            } else if (_subMenu == MENU_DISPLAY_SCREEN || _subMenu == MENU_THEME) {
+                _subMenu = MENU_DISPLAY;
+                buildDisplayMenu();
+            } else if (_subMenu == MENU_THEME_CUSTOM) {
+                _subMenu = MENU_THEME;
+                buildThemeMenu();
             } else {
                 _subMenu = MENU_MAIN;
                 buildMainMenu();
@@ -773,13 +1070,53 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             return true;
         }
 
-        // Handle radio presets (items 1..NUM_PRESETS; item 0 is the "Active:" label)
-        if (_subMenu == MENU_RADIO && sel >= 1 && sel <= NUM_PRESETS) {
-            applyRadioPreset(sel - 1);
+        // Display menu navigation (Screen / Theme / Name)
+        if (_subMenu == MENU_DISPLAY) {
+            switch (sel) {
+                case 0: _subMenu = MENU_DISPLAY_SCREEN; buildDisplayScreenMenu(); break;
+                case 1: _subMenu = MENU_THEME; buildThemeMenu(); break;
+                case 2: startEditing(0, getCurrentValue(MENU_DISPLAY, 0)); break;
+            }
             return true;
         }
-        // Item 0 ("Active: ...") is non-interactive
-        if (_subMenu == MENU_RADIO && sel == 0) {
+
+        // Theme menu: item 0 is "Active:" (non-interactive), items 1..PRESET_COUNT
+        // are presets, and the final row is "[Custom]" — selectable the same
+        // way as any preset, just opening the per-hue editor instead of
+        // applying a fixed palette.
+        if (_subMenu == MENU_THEME) {
+            if (sel == 0) return true;
+            if (sel >= 1 && sel <= Theme::PRESET_COUNT) {
+                applyThemePreset(sel - 1);
+                return true;
+            }
+            if (sel == Theme::PRESET_COUNT + 1) {
+                _subMenu = MENU_THEME_CUSTOM;
+                buildThemeCustomMenu();
+                return true;
+            }
+            return true;
+        }
+
+        // Theme > Custom: item 0 toggles Hex/Mix input mode, items 1..7 are
+        // the base hues — opening either the hex field or the RGB mixer
+        // depending on that toggle.
+        if (_subMenu == MENU_THEME_CUSTOM) {
+            if (sel == 0) {
+                _useMixer = !_useMixer;
+                buildThemeCustomMenu();
+                return true;
+            }
+            int row = sel - 1;
+            if (row >= 0 && row < 7) {
+                int fieldIdx = kThemeFields[row].index;
+                if (_useMixer) {
+                    startMixer(fieldIdx);
+                } else {
+                    startEditing(fieldIdx, getCurrentValue(MENU_THEME_CUSTOM, fieldIdx),
+                                 std::string(kThemeFields[row].label) + " (hex RRGGBB):");
+                }
+            }
             return true;
         }
 
@@ -884,9 +1221,10 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             return true;  // Back handled above
         }
 
-        // Edit the selected field (offset by 1+NUM_PRESETS for radio header+presets, 1 for WiFi mode)
+        // Edit the selected field (offset by 1 for WiFi mode; everything else
+        // reached here — Radio, Display > Screen — has no header row, so the
+        // list index is the field index directly)
         int fieldIdx = sel;
-        if (_subMenu == MENU_RADIO) fieldIdx -= (1 + NUM_PRESETS);
         if (_subMenu == MENU_WIFI) fieldIdx -= 1;
         std::string currentVal = getCurrentValue(_subMenu, fieldIdx);
         startEditing(fieldIdx, currentVal);
@@ -894,6 +1232,38 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
     }
 
     return false;
+}
+
+// Continuous polling for the mixer's accelerating hold-to-repeat: the first
+// step comes from handleKey() on the press edge (instant feedback on a
+// tap, always exactly 1 — see mixerStepSize()). From here on, while the
+// same key stays physically down, both the repeat rate AND the step size
+// ramp up together the longer it's held — starts as deliberate, ungapped
+// single nudges, ends at a fast cruise that jumps a full RGB332 bucket per
+// step. Resets the moment the key is released or swapped.
+void SettingsScreen::tick() {
+    if (_subMenu != MENU_THEME_MIXER || !_keyboard || _mixerHeldKey == 0) {
+        return;
+    }
+
+    if (!_keyboard->isKeyPressed(_mixerHeldKey)) {
+        _mixerHeldKey = 0;
+        return;
+    }
+
+    unsigned long now = millis();
+    unsigned long held = now - _mixerHeldSince;
+    unsigned long interval;
+    if (held < 500)        interval = 200;  // still feels like deliberate taps
+    else if (held < 1500)  interval = 130;
+    else if (held < 3000)  interval = 80;
+    else                   interval = 50;   // fast cruise — same tiers as mixerStepSize()
+
+    if (now - _mixerLastStepAt >= interval) {
+        _mixerLastStepAt = now;
+        int direction = (_mixerHeldKey == ',') ? -1 : 1;
+        stepMixerChannel(direction * mixerStepSize(_mixerChannel, held));
+    }
 }
 
 void SettingsScreen::showToast(const char* msg, unsigned long durationMs) {
@@ -938,43 +1308,6 @@ void SettingsScreen::applyAndSave() {
 
     Serial.println("[SETTINGS] Saved and applied");
     if (!_toastMessage) showToast("Saved!");
-}
-
-void SettingsScreen::applyRadioPreset(int preset) {
-    if (!_config || preset < 0 || preset >= NUM_PRESETS) return;
-    auto& s = _config->settings();
-
-    const auto& p = PRESETS[preset];
-    s.loraSF = p.sf;
-    s.loraBW = p.bw;
-    s.loraCR = p.cr;
-    s.loraTxPower = p.txPower;
-    // Set frequency to current region default
-    s.loraFrequency = REGION_FREQ[constrain(s.radioRegion, 0, REGION_COUNT - 1)];
-
-    applyAndSave();
-    buildRadioMenu();
-    if (_rns) {
-        // Encode display name + capability advertisement as msgpack app_data.
-        // Format: [display_name(bin), stamp_cost(nil|uint), supported_functionality(array)].
-        // stamp_cost=nil means no inbound stamp is required. Empty
-        // supported_functionality list signals no SF_COMPRESSION (bz2) support
-        // so Python LXMF disables auto_compress for us.
-        const String& name = _config ? _config->settings().displayName : String();
-        size_t nameLen = name.length();
-        if (nameLen > 31) nameLen = 31;
-        uint8_t buf[5 + 31];
-        size_t i = 0;
-        buf[i++] = 0x93;                   // fixarray(3)
-        buf[i++] = 0xC4;                   // bin 8
-        buf[i++] = (uint8_t)nameLen;
-        if (nameLen) { memcpy(buf + i, name.c_str(), nameLen); i += nameLen; }
-        buf[i++] = 0xC0;                   // stamp_cost = nil (no stamp required)
-        buf[i++] = 0x90;                   // empty fixarray (no SF_* supported)
-        _rns->announce(RNS::Bytes(buf, i));
-    }
-    showToast("Preset applied + announced");
-    Serial.printf("[SETTINGS] Radio preset %d applied\n", preset);
 }
 
 void SettingsScreen::factoryReset() {
