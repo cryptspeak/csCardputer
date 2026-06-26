@@ -8,8 +8,8 @@
 // upstream ratspeak/rsCardputer version numbering (see docs/firmware-architecture.md).
 #define RSCARDPUTER_VERSION_MAJOR  0
 #define RSCARDPUTER_VERSION_MINOR  0
-#define RSCARDPUTER_VERSION_PATCH  2
-#define RSCARDPUTER_VERSION_STRING "0.0.2"
+#define RSCARDPUTER_VERSION_PATCH  3
+#define RSCARDPUTER_VERSION_STRING "0.0.3"
 
 // --- Feature Flags ---
 #define HAS_DISPLAY     true
@@ -30,6 +30,10 @@
 #define PATH_IDENTITY_BAK   "/identity/identity.key.bak"
 #define PATH_PATHS          "/transport/paths.msgpack"
 #define PATH_USER_CONFIG    "/config/user.json"
+// Theme is intentionally plaintext (not behind SettingsEncryption) — colors
+// carry no sensitive information and the boot/password-gate screens need a
+// theme before any identity is unlocked. See docs/theme-config.md.
+#define PATH_THEME_CONFIG   "/config/theme.json"
 // Directory paths intentionally have NO trailing slash — some FATFS/VFS
 // readdir paths fail to enumerate when given a path ending in '/'.
 // Concat sites must add their own '/' before the basename.
@@ -41,6 +45,7 @@
 // TODO: Migrate to /rscardputer only with an explicit data migration plan.
 #define SD_PATH_CONFIG_DIR   "/ratcom/config"
 #define SD_PATH_USER_CONFIG  "/ratcom/config/user.json"
+#define SD_PATH_THEME_CONFIG "/ratcom/config/theme.json"
 #define SD_PATH_MESSAGES     "/ratcom/messages"
 #define SD_PATH_CONTACTS     "/ratcom/contacts"
 #define SD_PATH_IDENTITY     "/ratcom/identity/identity.key"

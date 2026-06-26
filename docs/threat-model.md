@@ -30,6 +30,11 @@ This protects against an attacker who **physically obtains the device**
   part of how Reticulum's discovery works. Encrypting a contact's *name*
   protects something you added privately; it can't and doesn't try to
   hide the fact that some hash exists or was seen.
+- **The color theme.** `theme.json` carries no sensitive information and is
+  deliberately stored in plaintext outside the encrypted settings blob — the
+  boot/password-gate screens need a theme before any identity is unlocked.
+  See [theme-config.md](theme-config.md) for why a tampered copy of this
+  file is bounded to "looks wrong," never a crash or an attack surface.
 - **Weak passwords.** PBKDF2 with 65,536 iterations raises the cost per
   guess, but it cannot turn `password123` into a strong secret. This is a
   cost multiplier, not a substitute for picking a real passphrase.

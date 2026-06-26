@@ -12,6 +12,11 @@ public:
     void begin();
     void render();
 
+    // Re-applies Theme:: colors to the canvas palette — call after Theme::load()
+    // or after the user changes the theme in Settings. Safe to call any time
+    // after begin().
+    void refreshPalette();
+
     // Screen management
     void setScreen(Screen* screen);
     Screen* getScreen() { return _currentScreen; }
@@ -33,6 +38,10 @@ public:
 
     // Handle key event — routes to current screen
     bool handleKey(const KeyEvent& event);
+
+    // Routes to the current screen's tick() — call once per main-loop
+    // iteration, independent of render timing.
+    void tick() { if (_currentScreen) _currentScreen->tick(); }
 
     // Dirty flag management
     void markStatusDirty() { _statusDirty = true; }

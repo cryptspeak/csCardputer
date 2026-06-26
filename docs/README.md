@@ -21,6 +21,7 @@ most likely to need careful review.
 |---|---|
 | [firmware-architecture.md](firmware-architecture.md) | Directory layout, major modules, how they fit together |
 | [storage-layer.md](storage-layer.md) | `FlashStore` / `SDStore` / `WriteQueue` — the storage tiers everything else is built on |
+| [theme-config.md](theme-config.md) | Custom color themes — why `theme.json` is intentionally unencrypted, and why a malicious copy of it can't do anything beyond look ugly |
 
 ## Where to start
 

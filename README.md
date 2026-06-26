@@ -34,7 +34,6 @@ encryption works end to end, see [`docs/`](docs/README.md) — start with
 - [Documentation](#documentation)
 - [Hardware](#hardware)
 - [Flashing](#flashing)
-- [Radio Presets](#radio-presets)
 - [Standalone Mode](#standalone-mode)
 - [Build From Source](#build-from-source)
 - [Credits & License](#credits--license)
@@ -196,28 +195,17 @@ USB, no local toolchain required.
 Alternatively, build and upload manually with PlatformIO as described in
 [Build From Source](#build-from-source).
 
-## Radio Presets
+## Standalone Mode
 
-| Preset | SF | BW | CR | TXP | Bitrate | Link budget |
-|---|---|---|---|---|---|---|
-| Short Turbo | 7 | 500 kHz | 4/5 | 14 dBm | 21.99 kbps | 140 dB |
-| Short Fast | 7 | 250 kHz | 4/5 | 14 dBm | 10.84 kbps | 143 dB |
-| Short Slow | 8 | 250 kHz | 4/5 | 14 dBm | 6.25 kbps | 145.5 dB |
-| Medium Fast | 9 | 250 kHz | 4/5 | 17 dBm | 3.52 kbps | 148 dB |
-| Medium Slow | 10 | 250 kHz | 4/5 | 17 dBm | 1.95 kbps | 150.5 dB |
-| Long Turbo | 11 | 500 kHz | 4/8 | 22 dBm | 1.34 kbps | 150 dB |
-| **Long Fast** *(default)* | **11** | **250 kHz** | **4/5** | **22 dBm** | **1.07 kbps** | **153 dB** |
-| Long Moderate | 11 | 125 kHz | 4/8 | 22 dBm | 0.34 kbps | 156 dB |
+This firmware supports only standalone mode in its current form.
 
-Standalone mode exposes radio settings on-device.
+Settings → Radio exposes Frequency/SF/BW/CR/TX Power as plain editable
+fields — dial in whatever combination matches your link budget needs by
+hand.
 
 The supported SX1262 cap is an 850-950 MHz radio target. 868 MHz and 915 MHz
 are valid software profiles for that hardware range. 433 MHz requires 433 MHz
 radio hardware. You are responsible for operating within your local laws.
-
-## Standalone Mode
-
-This firmware supports only standalone mode in its current form.
 
 ## Build From Source
 
@@ -264,6 +252,8 @@ pio run -e standalone_915 -t upload
   and [arduino-rns-password](https://github.com/konsumer/arduino-rns-password).
 - **RNode firmware** — bundled under `vendor/rnode_firmware/`, see its
   license below.
+- **AI assistance** — I (the maintainer) use Claude for small fixes and
+  documentation; architectural and security-relevant developments are mine.
 
 ### License
 

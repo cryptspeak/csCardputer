@@ -1,11 +1,35 @@
 #include "UIManager.h"
 
 void UIManager::begin() {
-    // 8-bit palette mode: 240×135×1 = 32,400 bytes (vs 64,800 at 16-bit)
-    // Saves 32KB heap — critical on this no-PSRAM device
+    // 8bpp canvas: 240x135x1 = 32,400 bytes (vs 64,800 at 16-bit) — saves
+    // 32KB heap, critical on this no-PSRAM device. Note: setColorDepth(8)
+    // only allocates an actual indexed palette when bpp < 8 (see
+    // LGFX_Sprite::setColorDepth(uint8_t) in M5GFX); at exactly 8 this is
+    // RGB332 truecolor (3/3/2 bits), not indexed — see refreshPalette().
     _canvas.setColorDepth(8);
     _canvas.createSprite(Theme::SCREEN_W, Theme::SCREEN_H);
-    // Register theme colors in palette — M5GFX auto-matches when drawing
+    refreshPalette();
+    Serial.printf("[UI] Canvas: 8-bit truecolor, %d bytes\n", Theme::SCREEN_W * Theme::SCREEN_H);
+    Theme::useSmallFont(_canvas);
+    _canvas.fillScreen(Theme::BG);
+    _needsRender = true;
+    _statusDirty = true;
+    _contentDirty = true;
+    _tabDirty = true;
+
+    // Wire up dirty flag callbacks
+    _statusBar.setDirtyFlag(&_statusDirty);
+    _tabBar.setDirtyFlag(&_tabDirty);
+}
+
+void UIManager::refreshPalette() {
+    // NOTE: the canvas is 8bpp RGB332 truecolor, not an indexed palette (see
+    // the comment in begin()), so these setPaletteColor() calls are
+    // currently no-ops — _canvas has no palette buffer to write into.
+    // Theme:: colors render via direct RGB565->RGB332 truncation at each
+    // draw call instead, which is also why this function still needs to
+    // exist: markAllDirty() below is what actually makes a theme change
+    // visible, by forcing every screen to redraw with the new Theme:: values.
     _canvas.setPaletteColor(0, Theme::BG);
     _canvas.setPaletteColor(1, Theme::PRIMARY);
     _canvas.setPaletteColor(2, Theme::SECONDARY);
@@ -28,17 +52,7 @@ void UIManager::begin() {
     _canvas.setPaletteColor(19, Theme::PRIMARY_SUBTLE);
     _canvas.setPaletteColor(20, Theme::SUCCESS);
     _canvas.setPaletteColor(21, Theme::DIVIDER);
-    Serial.printf("[UI] Canvas: 8-bit palette, %d bytes\n", Theme::SCREEN_W * Theme::SCREEN_H);
-    Theme::useSmallFont(_canvas);
-    _canvas.fillScreen(Theme::BG);
-    _needsRender = true;
-    _statusDirty = true;
-    _contentDirty = true;
-    _tabDirty = true;
-
-    // Wire up dirty flag callbacks
-    _statusBar.setDirtyFlag(&_statusDirty);
-    _tabBar.setDirtyFlag(&_tabDirty);
+    markAllDirty();
 }
 
 void UIManager::setScreen(Screen* screen) {
