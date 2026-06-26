@@ -17,10 +17,16 @@ def merge_bin(source, target, env):
 
     output = os.path.join(project_dir, "rscardputer-standalone-factory.bin")
 
+    # Invoke PlatformIO's own bundled esptool.py script directly rather than
+    # "python -m esptool" — esptool isn't necessarily installed as an
+    # importable module in $PYTHONEXE's environment (e.g. a pipx install of
+    # PlatformIO), but PlatformIO always ships this tool package itself.
     python = env.subst("$PYTHONEXE")
+    esptool_dir = env.PioPlatform().get_package_dir("tool-esptoolpy")
+    esptool_script = os.path.join(esptool_dir, "esptool.py")
     env.Execute(
-        f"{shlex.quote(python)} -m esptool --chip esp32s3 merge-bin "
-        "--flash-mode dio --flash-size 8MB "
+        f"{shlex.quote(python)} {shlex.quote(esptool_script)} --chip esp32s3 merge_bin "
+        "-fm dio -fs 8MB "
         f"-o {shlex.quote(output)} "
         f"0x0000 {shlex.quote(os.path.join(build_dir, 'bootloader.bin'))} "
         f"0x8000 {shlex.quote(os.path.join(build_dir, 'partitions.bin'))} "

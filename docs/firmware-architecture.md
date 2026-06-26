@@ -30,9 +30,8 @@ src/
 ├── power/                Display dim/off timeout, brightness management
 ├── audio/                Notification sounds
 ├── input/                Keyboard driver, hotkey registration
-├── ui/                   Screen framework, status/tab bars, theming
-│   └── screens/           Individual screens (Boot, Password, Home, Messages, Settings, Nodes, ...)
-└── platform/             Board-mode switch helpers (return-to-launcher, etc.)
+└── ui/                   Screen framework, status/tab bars, theming
+    └── screens/           Individual screens (Boot, Password, Home, Messages, Settings, Nodes, ...)
 ```
 
 ## Key relationships
@@ -64,8 +63,8 @@ src/
 - **`transport/` + `radio/`** implement the actual `RNS::Interface`s
   (LoRa, WiFi, TCP, AutoInterface, the BLE stub) and the SX1262 driver
   underneath LoRa. See [network-interfaces.md](network-interfaces.md).
-- **`hal/`, `input/`, `power/`, `audio/`, `platform/`** are board-level
-  glue with no Reticulum or storage knowledge of their own. See
+- **`hal/`, `input/`, `power/`, `audio/`** are board-level glue with no
+  Reticulum or storage knowledge of their own. See
   [hardware-platform.md](hardware-platform.md).
 - **UI screens** (`src/ui/screens/`) are largely independent and talk to
   the managers above through narrow setter/getter APIs

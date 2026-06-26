@@ -3,7 +3,6 @@
 Modules: [`src/hal/`](../src/hal/), [`src/input/`](../src/input/),
 [`src/power/PowerManager.{h,cpp}`](../src/power/PowerManager.h),
 [`src/audio/AudioNotify.{h,cpp}`](../src/audio/AudioNotify.h),
-[`src/platform/RsCardputerModeSwitch.h`](../src/platform/RsCardputerModeSwitch.h),
 [`src/config/BoardConfig.h`](../src/config/BoardConfig.h)
 
 The board-level glue that doesn't belong to Reticulum, storage, or UI.
@@ -126,28 +125,6 @@ processing — see the `pendingMessageSound` flag in `main.cpp`, which
 defers the actual `audio.playMessage()` call out of the packet
 callback and into the next `loop()` iteration specifically for this
 reason.
-
-## Launcher mode switch (`platform/RsCardputerModeSwitch.h`)
-
-This firmware is one of (at least) three OTA app images sharing the
-device's flash — Launcher, Standalone (this firmware), and RNode —
-selected via ESP-IDF's OTA boot-partition mechanism
-(`esp_ota_set_boot_partition()`), not a reboot-into-bootloader scheme.
-`setNextBoot(mode)` only **arms** which partition the *next* reset will
-load; it does not reboot by itself.
-
-`main.cpp::setup()` calls `returnToLauncherNextBoot()` unconditionally,
-as the very first thing it does on every boot
-([main.cpp:963](../src/main.cpp)) — before touching the display,
-keyboard, radio, or anything else. Read together with the
-boot-loop-counter logic right below it in the same function (which
-separately forces WiFi off after 3 consecutive failed boots), this
-reads as a safety net: if Standalone crashes, watchdog-resets, or
-browns out before it can finish booting, the *next* power-on lands at
-the Launcher menu instead of silently looping back into a possibly-
-broken Standalone image. The Launcher side of this (re-arming
-next-boot to Standalone when the user picks it from the menu) lives in
-a separate firmware image, not in this repo.
 
 ## Pin reference
 
