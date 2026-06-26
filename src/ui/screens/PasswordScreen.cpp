@@ -87,14 +87,15 @@ bool PasswordScreen::handleKey(const KeyEvent& event) {
     if (!_statusMsg.isEmpty()) _statusMsg = "";
 
     if (event.del) {
+        // Backwards jump in setup mode: backspace on an empty confirm field
+        // goes back to editing the first field. Must be checked before the
+        // generic delete below, which would otherwise always return first
+        // and make this unreachable.
+        if (_mode == Mode::SETUP && _editingConfirm && _confirm.length() == 0) {
+            _editingConfirm = false;
+            return true;
+        }
         if (target.length() > 0) target.remove(target.length() - 1);
-        return true;
-    }
-
-    // Backwards jump in setup mode: backspace on empty confirm field goes
-    // back to editing the first field.
-    if (_mode == Mode::SETUP && _editingConfirm && _confirm.length() == 0 && event.del) {
-        _editingConfirm = false;
         return true;
     }
 
@@ -121,18 +122,23 @@ void PasswordScreen::renderField(M5Canvas& canvas, int y,
                                  const char* label) {
     int cx = Theme::SCREEN_W / 2;
 
-    canvas.setTextColor(Theme::MUTED);
-    int lw = strlen(label) * Theme::CHAR_W;
-    canvas.setCursor(cx - lw / 2, y);
-    canvas.print(label);
-
     int fieldW = MAX_LEN > 24 ? 24 * Theme::CHAR_W + 8 : MAX_LEN * Theme::CHAR_W + 8;
     int fieldX = cx - fieldW / 2;
     int fieldY = y + 10;
     int fieldH = Theme::CHAR_H + 6;
 
-    canvas.drawRect(fieldX, fieldY, fieldW, fieldH,
-                    active ? Theme::PRIMARY : Theme::BORDER);
+    // Left-aligned to the field's own edge rather than centered above it —
+    // a label floating in the middle of empty space over a wide box reads
+    // as disconnected from it; lining the two up reads as one unit.
+    if (label && label[0]) {
+        canvas.setTextColor(active ? Theme::PRIMARY : Theme::MUTED);
+        canvas.setCursor(fieldX, y);
+        canvas.print(label);
+    }
+
+    canvas.fillRoundRect(fieldX, fieldY, fieldW, fieldH, 3, Theme::BG_ELEVATED);
+    canvas.drawRoundRect(fieldX, fieldY, fieldW, fieldH, 3,
+                         active ? Theme::PRIMARY : Theme::BORDER);
     canvas.setTextColor(Theme::TEXT_PRIMARY);
     canvas.setCursor(fieldX + 4, fieldY + 3);
 
@@ -186,18 +192,31 @@ void PasswordScreen::render(M5Canvas& canvas) {
         return;
     }
 
+    // Status/hint position depends on mode: SETUP has two fields stacked
+    // above and needs more room, so it can't reuse the bottom-anchored
+    // offsets below without the confirm field colliding with them.
+    int statusY, hintY;
     if (_mode == Mode::SETUP) {
-        renderField(canvas, Theme::CONTENT_Y + 36, _pw,    !_editingConfirm, "Password");
-        renderField(canvas, Theme::CONTENT_Y + 70, _confirm, _editingConfirm, "Confirm");
+        // Spread across the full screen height instead of clumping near
+        // the top with dead space left unused at the bottom.
+        renderField(canvas, Theme::CONTENT_Y + 38, _pw,      !_editingConfirm, "Password");
+        renderField(canvas, Theme::CONTENT_Y + 68, _confirm,  _editingConfirm, "Confirm");
+        statusY = Theme::CONTENT_Y + 99;
+        hintY   = Theme::CONTENT_Y + 111;
     } else {
-        renderField(canvas, Theme::CONTENT_Y + 40, _pw, true, "Password");
+        // Only one field here — give it generous room on both sides rather
+        // than crowding it against the header or the footer.
+        renderField(canvas, Theme::CONTENT_Y + 50, _pw, true, nullptr);
+
+        statusY = Theme::CONTENT_Y + Theme::CONTENT_H - 20;
+        hintY   = Theme::CONTENT_Y + Theme::CONTENT_H - 10;
     }
 
     // Status line
     if (!_statusMsg.isEmpty()) {
         canvas.setTextColor(_statusColor);
         int mw = _statusMsg.length() * Theme::CHAR_W;
-        canvas.setCursor(cx - mw / 2, Theme::CONTENT_Y + Theme::CONTENT_H - 20);
+        canvas.setCursor(cx - mw / 2, statusY);
         canvas.print(_statusMsg.c_str());
     }
 
@@ -205,7 +224,7 @@ void PasswordScreen::render(M5Canvas& canvas) {
     canvas.setTextColor(Theme::BORDER);
     const char* hint = _showChars ? "Ctrl+S hide  Enter submit" : "Ctrl+S show  Enter submit";
     int hw = strlen(hint) * Theme::CHAR_W;
-    canvas.setCursor(cx - hw / 2, Theme::CONTENT_Y + Theme::CONTENT_H - 10);
+    canvas.setCursor(cx - hw / 2, hintY);
     canvas.print(hint);
 }
 
