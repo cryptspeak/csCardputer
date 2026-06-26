@@ -54,6 +54,8 @@ private:
 
     void resetState();
     void renderTitle(M5Canvas& canvas, const char* title);
+    // label may be null/empty to skip drawing it (the unlock screen's
+    // field already has "Password" covered by its subtitle).
     void renderField(M5Canvas& canvas, int y, const String& value,
                      bool active, const char* label);
 };
