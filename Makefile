@@ -19,7 +19,7 @@ all: package
 build: build-standalone
 
 build-standalone:
-	python3 -m platformio run -e $(STANDALONE_ENV)
+	pio run -e $(STANDALONE_ENV)
 
 image: build-standalone
 	mkdir -p $(BUILD_DIR)
@@ -35,7 +35,7 @@ package: image
 release: package
 
 flash: image
-	python3 -m esptool --chip esp32s3 --port $(PORT) --baud 460800 \
+	esptool --chip esp32s3 --port $(PORT) --baud 460800 \
 		--before default_reset --after hard_reset write-flash 0x0 $(STANDALONE_BIN)
 
 clean:

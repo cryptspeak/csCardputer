@@ -81,17 +81,7 @@ void StatusBar::render(M5Canvas& canvas) {
         canvas.print(batStr);
     }
 
-    // Center text — flash "ANNOUNCED" briefly, otherwise show mode
-    const char* centerText = _transportMode;
-    uint16_t centerColor = Theme::ACCENT;
-    if (millis() < _announceFlashUntil) {
-        centerText = "ANNOUNCED";
-        centerColor = Theme::PRIMARY;
-    }
-    canvas.setTextColor(centerColor);
-    int modeLen = canvas.textWidth(centerText);
-    canvas.setCursor((Theme::SCREEN_W - modeLen) / 2, Theme::SHELL_TEXT_Y);
-    canvas.print(centerText);
+    // Center is left blank — HomeScreen already shows its own "Announced!" toast.
 
     // Connection indicators (right) — LoRa + TCP + AutoIface peers
     int rx = Theme::SCREEN_W - 4;

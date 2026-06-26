@@ -42,7 +42,6 @@
 #include "audio/AudioNotify.h"
 #include "transport/BLEStub.h"
 #include "hal/GPSManager.h"
-#include "platform/RsCardputerModeSwitch.h"
 #include <Preferences.h>
 #include <atomic>
 #include <cctype>
@@ -412,9 +411,6 @@ static void announceWithName(bool silent) {
         userConfig.settings().displayName.c_str(), (int)appData.size(),
         silent ? "yes" : "no");
     rns.announce(appData);
-    if (!silent) {
-        ui.statusBar().flashAnnounce();
-    }
 }
 
 static bool enableCapLoRaRfSwitch() {
@@ -959,11 +955,6 @@ void setup() {
     Serial.printf("  rsCardputer Standalone v%s\n", RSCARDPUTER_VERSION_STRING);
     Serial.println("  M5Stack Cardputer Adv");
     Serial.println("=================================");
-
-    auto launcherBoot = rs_cardputer_adv::returnToLauncherNextBoot();
-    if (!launcherBoot.ok) {
-        Serial.printf("[BOOT] Launcher return unavailable: %s\n", launcherBoot.message);
-    }
 
     esp_reset_reason_t reason = esp_reset_reason();
     const char* reasonStr = "UNKNOWN";

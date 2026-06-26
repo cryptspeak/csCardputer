@@ -36,7 +36,7 @@ most likely to need careful review.
 | Doc | Covers |
 |---|---|
 | [network-interfaces.md](network-interfaces.md) | LoRa/WiFi/TCP/AutoInterface/BLE interfaces, the SX1262 driver, shared-SPI arbitration |
-| [hardware-platform.md](hardware-platform.md) | GPS, keyboard/hotkeys, power management, audio, the launcher partition switch, pin reference |
+| [hardware-platform.md](hardware-platform.md) | GPS, keyboard/hotkeys, power management, audio, pin reference |
 | [ui-framework.md](ui-framework.md) | The `Screen`/`UIManager` framework, dirty-flag rendering, input routing, widgets, screen index |
 
 ## Where to start

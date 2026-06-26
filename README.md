@@ -176,7 +176,7 @@ encryption design and the rest of the firmware's architecture:
 | [docs/lxmf-messaging.md](docs/lxmf-messaging.md) | LXMF send/receive flow, delivery proofs, on-disk message format and capacity limits |
 | [docs/announce-discovery.md](docs/announce-discovery.md) | Peer discovery, app_data name parsing, contacts vs. the name cache |
 | [docs/network-interfaces.md](docs/network-interfaces.md) | LoRa/WiFi/TCP/AutoInterface/BLE interfaces and the SX1262 radio driver |
-| [docs/hardware-platform.md](docs/hardware-platform.md) | GPS, keyboard/hotkeys, power, audio, the launcher partition switch, pin reference |
+| [docs/hardware-platform.md](docs/hardware-platform.md) | GPS, keyboard/hotkeys, power, audio, pin reference |
 | [docs/ui-framework.md](docs/ui-framework.md) | The screen/widget framework, dirty-flag rendering, input routing |
 
 ## Hardware
@@ -238,7 +238,13 @@ Flash it manually with PlatformIO:
 pio run -e standalone_915 -t upload
 ```
 
-> Note: this repository currently requires manual PlatformIO build and upload; the Makefile workflow is not fully functional yet.
+Or use the `Makefile`, which builds, merges the bootloader/partition table/app
+into a single flashable image, and packages it as a web-flasher-ready zip:
+
+```bash
+make package   # -> dist/rscardputer-standalone.zip
+make flash     # build + flash over USB (PORT=/dev/ttyACM0 by default)
+```
 
 ## Credits & License
 
@@ -256,14 +262,16 @@ pio run -e standalone_915 -t upload
   [konsumer](https://github.com/konsumer)'s
   [arduino-rns-encrypted-store](https://github.com/konsumer/arduino-rns-encrypted-store)
   and [arduino-rns-password](https://github.com/konsumer/arduino-rns-password).
-- **RNode firmware** — bundled under `vendor/rnode_firmware/`, see its
-  license below.
+- **SX1262 driver** — the LoRa radio driver in `src/radio/` is adapted from
+  the MIT-licensed SX1276/SX1262 driver in
+  [RNode Firmware Community Edition](https://github.com/liberatedsystems/RNode_Firmware_CE),
+  Copyright © Sandeep Mistry, modifications by Mark Qvist & Jacob Eva.
 - **AI assistance** — I (the maintainer) use Claude for small fixes and
   documentation; architectural and security-relevant developments are mine.
 
 ### License
 
-Ratspeak's Cardputer standalone application, launcher, partition tables, and packaging tools are licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
+Ratspeak's Cardputer standalone application, partition tables, and packaging tools are licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
 
-The bundled RNode firmware under `vendor/rnode_firmware/` is licensed under
-the GNU General Public License v3.0. See [LICENSE-RNODE](LICENSE-RNODE).
+The SX1262 driver in `src/radio/` carries its own MIT license terms — see
+the attribution comment at the top of [`SX1262.cpp`](src/radio/SX1262.cpp).
