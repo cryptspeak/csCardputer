@@ -223,9 +223,11 @@ bool ReticulumManager::begin(SX1262* radio, FlashStore* flash) {
     // Endpoint node: routing tables are rebuilt from announces on each boot.
     // No need to restore transport tables from SD — saves ~12KB heap + boot time.
 
-    // Create and register LoRa interface (default mode — endpoint, not gateway)
+    // Create and register LoRa interface. This is a mobile endpoint, so LoRa
+    // uses roaming mode while Reticulum transport remains disabled below.
     _loraImpl = new LoRaInterface(radio, "LoRa.915");
     _loraIface = _loraImpl;
+    _loraIface.mode(RNS::Type::Interface::MODE_ROAMING);
     RNS::Transport::register_interface(_loraIface);
     if (!_loraImpl->start()) {
         Serial.println("[RNS] WARNING: LoRa interface failed to start — radio offline");
