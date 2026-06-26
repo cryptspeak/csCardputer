@@ -23,6 +23,22 @@ most likely to need careful review.
 | [storage-layer.md](storage-layer.md) | `FlashStore` / `SDStore` / `WriteQueue` — the storage tiers everything else is built on |
 | [theme-config.md](theme-config.md) | Custom color themes — why `theme.json` is intentionally unencrypted, and why a malicious copy of it can't do anything beyond look ugly |
 
+## Reticulum / LXMF core
+
+| Doc | Covers |
+|---|---|
+| [reticulum-integration.md](reticulum-integration.md) | `ReticulumManager` — endpoint-only config, the LittleFS bridge, the background persist task, and announce-flood defense layer 1 |
+| [lxmf-messaging.md](lxmf-messaging.md) | `LXMFManager` + `MessageStore` — send/receive flow, delivery proofs/retries, on-disk message format and capacity limits |
+| [announce-discovery.md](announce-discovery.md) | `AnnounceManager` — announce-flood defense layers 2-3, app_data name parsing, the node table, contacts vs. name cache |
+
+## Network & hardware
+
+| Doc | Covers |
+|---|---|
+| [network-interfaces.md](network-interfaces.md) | LoRa/WiFi/TCP/AutoInterface/BLE interfaces, the SX1262 driver, shared-SPI arbitration |
+| [hardware-platform.md](hardware-platform.md) | GPS, keyboard/hotkeys, power management, audio, the launcher partition switch, pin reference |
+| [ui-framework.md](ui-framework.md) | The `Screen`/`UIManager` framework, dirty-flag rendering, input routing, widgets, screen index |
+
 ## Where to start
 
 If you only read one thing, read [encryption-overview.md](encryption-overview.md) —
