@@ -997,6 +997,19 @@ void setup() {
     bootScreen.setProgress(0.1f, "Display ready");
     ui.render();
 
+    // Play the boot mark's intro animation (wipe-in, decrypt-scramble
+    // title, then the bar/status fade-in) out to completion before doing
+    // any real init work. Without this, BootScreen only gets repainted
+    // once per init step below — far too few frames for the animation to
+    // read as motion. This is a fixed, one-time ~1s cosmetic cost paid
+    // once at the very start of boot; nothing below is delayed or
+    // reordered by it.
+    uint32_t introStart = millis();
+    while (millis() - introStart < BootScreen::INTRO_MS) {
+        ui.render();
+        delay(20);
+    }
+
     // Initialize keyboard
     keyboard.begin();
     bootScreen.setProgress(0.15f, "Keyboard ready");

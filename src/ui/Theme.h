@@ -22,6 +22,20 @@ constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
+// Linear-interpolates two RGB565 colors channel-by-channel (t=0 -> a,
+// t=1 -> b). Used for fade-in/out effects (e.g. the boot screen reveal)
+// where M5GFX has no per-pixel alpha blending to lean on instead.
+inline uint16_t lerp565(uint16_t a, uint16_t b, float t) {
+    if (t <= 0.0f) return a;
+    if (t >= 1.0f) return b;
+    int ar = (a >> 11) & 0x1F, ag = (a >> 5) & 0x3F, ab = a & 0x1F;
+    int br = (b >> 11) & 0x1F, bg = (b >> 5) & 0x3F, bb = b & 0x1F;
+    int r = ar + (int)((br - ar) * t);
+    int g = ag + (int)((bg - ag) * t);
+    int bl = ab + (int)((bb - ab) * t);
+    return (uint16_t)((r << 11) | (g << 5) | bl);
+}
+
 // --- Colors (RGB565) — mutable, see Theme.cpp for defaults ---
 extern uint16_t BG;
 extern uint16_t BG_ELEVATED;
