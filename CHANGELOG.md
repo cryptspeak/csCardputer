@@ -5,6 +5,34 @@ Versioning is independent of upstream
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) — see
 `docs/firmware-architecture.md`.
 
+## v0.0.5 — Radio Frequency Fix
+
+### Fixed
+
+- **Radio:** switching the LoRa frequency to a new band (e.g. the
+  default Americas 915MHz to a saved Europe 868MHz setting on boot)
+  could silently fail to reach the chip — the radio kept transmitting
+  and receiving on the old frequency while software, logs, and the
+  Settings screen all showed the new one as active. Reopening Settings
+  and confirming any radio value "fixed" it until the next reboot, which
+  masked the real bug: `calibrate_image()` skips recalibration once a
+  band has already been calibrated, so that second call never actually
+  exercised the broken path, it just reapplied the frequency on an
+  already-calibrated, idle chip.
+  The actual cause was `waitOnBusy()` capping its poll at 100ms.
+  `CalibrateImage` on a fresh, uncached band can legitimately take
+  longer than that on this hardware, and once the cap was hit the
+  function returned while the chip's BUSY line was still genuinely
+  asserted. The SX126x ignores SPI while busy, so the `SetRfFrequency`
+  write issued right after by `setFrequency()` landed on a still-busy
+  chip and was silently dropped, leaving the old frequency in effect.
+  Fixed by raising the `waitOnBusy()` cap to 1000ms and adding the same
+  settle delay `calibrate()` already had before its own `waitOnBusy()`
+  call, since `CalibrateImage` has the same BUSY-assertion-propagation
+  gap.
+
+Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.4...v0.0.5
+
 ## v0.0.4 — Boot Branding, Radio & Transport Fixes
 
 ### Added
