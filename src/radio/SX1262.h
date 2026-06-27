@@ -26,6 +26,9 @@ public:
     int  beginPacket(int implicitHeader = 0);
     int  endPacket(bool async = false);
     bool isTxBusy();
+    // Valid only in the call immediately after isTxBusy() returns false:
+    // true if the async TX ended via timeout rather than IRQ_TX_DONE.
+    bool lastTxFailed() const { return _lastTxFailed; }
     size_t write(uint8_t byte);
     size_t write(const uint8_t* buffer, size_t size);
 
@@ -142,6 +145,7 @@ private:
     uint8_t _imageCalBand = 0xFF;
 
     bool _txActive = false;
+    bool _lastTxFailed = false;
     uint32_t _txStartMs = 0;
     uint32_t _txTimeoutMs = 0;
 

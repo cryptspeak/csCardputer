@@ -476,15 +476,10 @@ int SX1262::endPacket(bool async) {
 bool SX1262::isTxBusy() {
     if (!_txActive) return false;
 
-    if (millis() > _txTimeoutMs) {
-        Serial.printf("[SX1262] TX ASYNC TIMEOUT after %dms\n",
-                      (int)(millis() - _txStartMs));
-        uint8_t mask[2] = {0x00, IRQ_TX_DONE_MASK_6X};
-        executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
-        _txActive = false;
-        return false;
-    }
-
+    // Check the latched IRQ flag before the deadline: if loop() got delayed (e.g.
+    // by UI rendering) and is only polling after _txTimeoutMs has passed, the TX
+    // may well have already completed successfully. Declaring a timeout without
+    // checking IRQ_TX_DONE first would discard a packet that actually went out.
     uint8_t buf[2] = {0};
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
     if (buf[1] & IRQ_TX_DONE_MASK_6X) {
@@ -493,6 +488,17 @@ bool SX1262::isTxBusy() {
         uint8_t mask[2] = {0x00, IRQ_TX_DONE_MASK_6X};
         executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
         _txActive = false;
+        _lastTxFailed = false;
+        return false;
+    }
+
+    if (millis() > _txTimeoutMs) {
+        Serial.printf("[SX1262] TX ASYNC TIMEOUT after %dms\n",
+                      (int)(millis() - _txStartMs));
+        uint8_t mask[2] = {0x00, IRQ_TX_DONE_MASK_6X};
+        executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
+        _txActive = false;
+        _lastTxFailed = true;
         return false;
     }
 
