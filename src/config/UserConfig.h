@@ -45,14 +45,19 @@ struct UserSettings {
     bool audioEnabled = true;
     uint8_t audioVolume = 80;  // 0-100
 
-    // Time
-    int8_t utcOffset = -5;  // Hours from UTC (default EST)
-    uint8_t timezoneIdx = 6; // Index into TIMEZONE_TABLE (default: New York)
-    bool timezoneSet = false; // false = show timezone picker at boot
-
-    // GPS
+    // GPS — primary time source; gives UTC directly, plus a TimeZoneDB/
+    // longitude-estimated local offset (see GPSManager)
     bool gpsTimeEnabled = true;      // Sync system clock from GPS
     bool gpsLocationEnabled = false; // Track position (user must opt in)
+
+    // Manual timezone override — off by default (GPS estimates the local
+    // offset automatically). When on, manualUtcOffsetHours is used as-is
+    // instead, with no automatic DST adjustment.
+    bool manualTimezoneEnabled = false;
+    int8_t manualUtcOffsetHours = 0;
+
+    // Setup
+    bool radioConfigured = false; // false = show LoRa setup wizard at boot
 
     // AutoInterface (IPv6 multicast LAN auto-discovery; opt-in)
     bool   autoIfaceEnabled  = false;

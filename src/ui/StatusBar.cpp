@@ -32,7 +32,7 @@ void StatusBar::render(M5Canvas& canvas) {
     canvas.fillRect(0, 0, Theme::SCREEN_W, Theme::STATUS_BAR_H, Theme::BAR_BG);
     canvas.drawFastHLine(0, Theme::STATUS_BAR_H - 1, Theme::SCREEN_W, Theme::DIVIDER);
 
-    // Left side: battery icon + rotating status text.
+    // Left side: battery icon + percentage.
     unsigned long now = millis();
     if (_smoothedBattery < 0 || now - _lastBatteryRead >= 2000) {
         int raw = readBatteryLevel();
@@ -66,22 +66,23 @@ void StatusBar::render(M5Canvas& canvas) {
     snprintf(batStr, sizeof(batStr), "%d%%", batLevel);
 
     int textX = bx + bw + 5;
+    canvas.setTextColor(charging ? Theme::ACCENT : batColor);
+    canvas.setCursor(textX, Theme::SHELL_TEXT_Y);
+    canvas.print(batStr);
+
+    // Center: permanent clock (GPS-synced UTC, offset to an estimated local
+    // time — see GPSManager). Dimmed until a real satellite fix has been
+    // obtained, since it may still be showing a restored/stale time.
     time_t t = time(nullptr);
     if (t > 1700000000) {
         struct tm* tm = localtime(&t);
         char clockStr[8];
         snprintf(clockStr, sizeof(clockStr), "%d:%02d", tm->tm_hour, tm->tm_min);
-        bool showClock = ((now / 5000UL) % 2UL) == 1UL;
-        canvas.setTextColor(showClock ? Theme::TEXT_PRIMARY : (charging ? Theme::ACCENT : batColor));
-        canvas.setCursor(textX, Theme::SHELL_TEXT_Y);
-        canvas.print(showClock ? clockStr : batStr);
-    } else {
-        canvas.setTextColor(charging ? Theme::ACCENT : batColor);
-        canvas.setCursor(textX, Theme::SHELL_TEXT_Y);
-        canvas.print(batStr);
+        int cw = canvas.textWidth(clockStr);
+        canvas.setTextColor(_gpsTimeFix ? Theme::TEXT_PRIMARY : Theme::MUTED);
+        canvas.setCursor((Theme::SCREEN_W - cw) / 2, Theme::SHELL_TEXT_Y);
+        canvas.print(clockStr);
     }
-
-    // Center is left blank — HomeScreen already shows its own "Announced!" toast.
 
     // Connection indicators (right) — LoRa + TCP + AutoIface peers
     int rx = Theme::SCREEN_W - 4;

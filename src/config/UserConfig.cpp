@@ -70,8 +70,7 @@ void UserConfig::sanitizeSettings() {
     _settings.brightness = constrain(_settings.brightness, 1, 255);
     _settings.audioVolume = constrain(_settings.audioVolume, 0, 100);
 
-    _settings.utcOffset = constrain(_settings.utcOffset, -12, 14);
-    if (_settings.timezoneIdx >= 21) _settings.timezoneIdx = 6;
+    _settings.manualUtcOffsetHours = constrain(_settings.manualUtcOffsetHours, -12, 14);
     _settings.autoIfaceMaxPeers = constrain(_settings.autoIfaceMaxPeers, 1, 16);
 
     std::vector<TCPEndpoint> cleanTcp;
@@ -139,11 +138,12 @@ bool UserConfig::parseJson(const String& json) {
     _settings.audioEnabled = doc["audio_on"]  | true;
     _settings.audioVolume  = doc["audio_vol"] | 80;
 
-    _settings.utcOffset   = doc["utc_offset"]    | -5;
-    _settings.timezoneIdx = doc["tz_idx"]       | 6;
-    _settings.timezoneSet = doc["tz_set"]       | false;
     _settings.gpsTimeEnabled = doc["gps_time"] | true;
     _settings.gpsLocationEnabled = doc["gps_loc"] | false;
+    _settings.radioConfigured = doc["radio_configured"] | false;
+
+    _settings.manualTimezoneEnabled = doc["tz_manual"] | false;
+    _settings.manualUtcOffsetHours  = doc["tz_manual_offset"] | 0;
 
     _settings.autoIfaceEnabled  = doc["autoiface_en"]    | false;
     _settings.autoIfaceGroupId  = doc["autoiface_group"] | "reticulum";
@@ -191,11 +191,12 @@ String UserConfig::serializeToJson() {
     doc["audio_on"]  = _settings.audioEnabled;
     doc["audio_vol"] = _settings.audioVolume;
 
-    doc["utc_offset"]   = _settings.utcOffset;
-    doc["tz_idx"]       = _settings.timezoneIdx;
-    doc["tz_set"]       = _settings.timezoneSet;
     doc["gps_time"]     = _settings.gpsTimeEnabled;
     doc["gps_loc"]      = _settings.gpsLocationEnabled;
+    doc["radio_configured"] = _settings.radioConfigured;
+
+    doc["tz_manual"]        = _settings.manualTimezoneEnabled;
+    doc["tz_manual_offset"] = _settings.manualUtcOffsetHours;
 
     doc["autoiface_en"]    = _settings.autoIfaceEnabled;
     doc["autoiface_group"] = _settings.autoIfaceGroupId;

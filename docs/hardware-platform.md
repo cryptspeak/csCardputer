@@ -12,46 +12,76 @@ the full pinout.
 
 ## GPS (`hal/GPSManager.{h,cpp}`, `hal/NMEAParser.h`)
 
-**Status: backend implemented, not yet exposed in the Settings UI.**
-`UserConfig`'s `gpsTimeEnabled`/`gpsLocationEnabled` fields exist and
-default to `true`/`false` respectively, and `main.cpp` wires up
-`GPSManager` from them at boot, but there is currently no Settings
-screen to toggle either one — they're only reachable by hand-editing
-the saved `user.json` config. `BoardConfig.h` marks the GNSS pins
-"reserved for v1.1" — that version label is inherited from the
-original upstream codebase this firmware was forked from (this fork
-uses its own independent release line, see `Config.h`), so treat it as
-"not yet finished," not as a commitment from this fork's maintainer.
+**Status: primary time source, active by default.** `UserConfig`'s
+`gpsTimeEnabled`/`gpsLocationEnabled` fields default to `true`/`false`
+respectively, and `main.cpp` wires up `GPSManager` from them at boot.
+GPS replaced the old first-boot timezone picker as the way the clock
+gets set — `RadioSetupScreen` (see `ui-framework.md`) is the actual
+first-boot wizard now, for LoRa parameters instead of a timezone. There
+is currently no Settings screen to toggle `gpsTimeEnabled`/
+`gpsLocationEnabled` themselves — they're only reachable by hand-editing
+the saved `user.json` config. There *is* a Settings > Time screen for
+overriding the local-time estimate described below (see "Local
+timezone" further down).
 
-Reserved for the optional Cap LoRa-1262 GNSS module on UART2
+The optional Cap LoRa-1262 GNSS module sits on UART2
 (`GPS_RX=15`, `GPS_TX=13`, `BoardConfig.h`). `NMEAParser` is a small,
 allocation-free, character-at-a-time `$GxRMC`/`$GxGGA` sentence parser
 (handles `GP`/`GN`/`GL`/`GA`/`GB` talker-ID prefixes) — there's no NMEA
 library dependency for this.
 
-Two independent things come out of a fix, tracked separately because
-they become available at different times:
+Three independent things come out of a fix, tracked separately because
+they become available — and are gated — differently:
 
 - **Time** — parsed from every valid RMC sentence regardless of fix
   quality, because a sentence carries UTC time even before the receiver
-  has a usable position lock. This is also why `setLocationEnabled()`
-  defaults to **off**: a user who only wants GPS for time sync (no
-  location stored anywhere) doesn't pay for position parsing at all.
-- **Location** — only parsed if `setLocationEnabled(true)` was called
-  *and* the sentence's status field is `A` (active fix, not `V` for
-  void).
+  has a usable position lock. `GPSManager::syncSystemTime()` sets the
+  system clock straight to that UTC value via `settimeofday()`.
+- **Local timezone** — there's no IANA tzdata in this firmware (too
+  heavy for the platform), but there is a small curated lookup,
+  [`hal/TimeZoneDB.h`](../src/hal/TimeZoneDB.h): a table of rectangular
+  lat/lon boxes over major population centers, each carrying a real
+  POSIX TZ rule string (the same kind the old timezone picker used), so
+  a covered region gets exact DST transition dates, not a guess. Boxes
+  don't follow real political borders, and ordering matters — smaller
+  carve-outs (e.g. Arizona, which doesn't observe DST) are listed before
+  the broader box they sit inside of, since `lookupPosixTZ()` returns
+  the first match. For positions the table doesn't cover (oceans, poles,
+  sparsely-populated regions), `GPSManager::updateLocalTimeZone()` falls
+  back to a coarser estimate: `round(longitude / 15)` plus a DST guess
+  from hemisphere + current month (Apr-Oct north, Oct-Mar south,
+  `guessDstHours()`) — month-granularity, not exact dates, and it'll
+  guess wrong for countries that don't observe DST at all. Either way
+  the result becomes a POSIX `TZ` string applied via
+  `setenv`/`tzset` (`GPSManager::applyPosixTZ()`), which is what
+  `localtime()` calls in `StatusBar`/`MessageView` actually render. The
+  lat/lon used for the lookup is parsed unconditionally
+  (`NMEAData::tzLatitude`/`tzLongitude`), independent of
+  `setLocationEnabled()`, but only as an ephemeral lookup key — never
+  stored or exposed as a position the way the opt-in `latitude`/
+  `longitude` pair below is. A manual override is available in Settings
+  > Time (`UserConfig::manualTimezoneEnabled`/`manualUtcOffsetHours`,
+  applied via `GPSManager::setManualOffset()`): when on, GPS position is
+  ignored entirely and a fixed UTC offset is used as-is, with no DST
+  auto-adjustment — useful wherever the lookup/fallback guesses wrong.
+- **Location** (lat/lon/altitude/hdop) — only parsed if
+  `setLocationEnabled(true)` was called *and* the sentence's status
+  field is `A` (active fix, not `V` for void). This is the privacy-gated
+  opt-in; nothing currently consumes it beyond NVS persistence (see
+  below) — there's no on-screen position display yet.
 
 `GPSManager::begin()` auto-detects baud rate (tries 38400, 115200, then
 115200's `GPS_BAUD` default again — see the source for the exact
 order) since not every GNSS module variant ships at the same default
 rate; it gives up and stays on the last-tried rate if none produce a
-parseable sentence within the detection window. Time is persisted to
-NVS (epoch seconds; the comment notes the location fields are stored
-as scaled integers — microdegrees / centimeters — specifically to
-avoid float-in-NVS edge cases on this platform) so a power-cycle can
-restore a "last known" time/position before the GPS module re-acquires
-a fix, without claiming GPS-grade accuracy for that restored value (the
-restore path does not mark a fresh satellite fix as having occurred).
+parseable sentence within the detection window. Time and the active
+POSIX TZ string are persisted to NVS (epoch seconds + the TZ string;
+opt-in location fields are stored separately as scaled integers —
+microdegrees / centimeters — specifically to avoid float-in-NVS edge
+cases on this platform) so a power-cycle can restore a "last known"
+time/timezone/position before the GPS module re-acquires a fix, without
+claiming GPS-grade accuracy for that restored value (the restore path
+does not mark a fresh satellite fix as having occurred).
 
 ## Keyboard (`input/Keyboard.{h,cpp}`)
 

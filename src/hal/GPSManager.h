@@ -19,6 +19,18 @@ public:
     // Time
     bool hasTimeFix() const { return _timeValid; }
 
+    // Local time, derived either from TimeZoneDB (real POSIX DST rules, if
+    // the GPS fix falls inside a covered region) or a coarse longitude +
+    // hemisphere/month DST guess otherwise — see updateLocalTimeZone().
+    // UTC until the first fix arrives or a prior estimate is restored from
+    // NVS. Overridden entirely by setManualOffset() when manual mode is on.
+    int8_t localOffsetHours() const { return _localOffsetHours; }
+    const char* posixTZ() const { return _posixTZ; }
+
+    // Manual override — when enabled, ignores GPS position entirely and
+    // applies this fixed UTC offset (no DST auto-adjustment) instead.
+    void setManualOffset(bool enabled, int8_t offsetHours);
+
     // Location
     bool hasLocationFix() const { return _locationValid; }
     double latitude() const { return _parser.data().latitude; }
@@ -36,11 +48,12 @@ public:
     bool isRunning() const { return _running; }
 
     // Configuration (set from outside before or after begin())
-    void setPosixTZ(const char* tz);
     void setLocationEnabled(bool enable) { _parser.setParseLocation(enable); }
 
 private:
     void syncSystemTime();
+    void updateLocalTimeZone(double latitude, double longitude, uint8_t month);
+    void applyPosixTZ(const char* tz);
     void restoreTimeFromNVS();
     void persistToNVS();
     bool tryBaudRate(uint32_t baud);
@@ -54,7 +67,9 @@ private:
     unsigned long _lastFixMs = 0;
     unsigned long _lastPersistMs = 0;
     uint32_t _timeSyncCount = 0;
-    char _posixTZ[48] = "EST5EDT,M3.2.0,M11.1.0";  // POSIX TZ string
+    char _posixTZ[48] = "UTC0";  // Active POSIX TZ string (may carry real DST rules)
+    int8_t _localOffsetHours = 0;
+    bool _manualOverride = false;
     uint32_t _detectedBaud = 0;
 
     // Baud auto-detect state

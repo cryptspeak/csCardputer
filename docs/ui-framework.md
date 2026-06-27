@@ -106,7 +106,7 @@ list/input handling:
   explicit progress value and an optional fade factor (used for the
   boot screen's reveal animation). No input handling at all.
 - **`ScrollList`** — the backing widget for every menu/list screen
-  (Messages, Nodes, Settings, Timezone). Owns selection index and
+  (Messages, Nodes, Settings, Radio Setup). Owns selection index and
   scroll offset together so the selected row is always kept in view;
   wrapping at both ends (`scrollDown()` past the last item wraps to
   index 0, `scrollUp()` past the first wraps to the last). Per-item
@@ -114,8 +114,8 @@ list/input handling:
   that need to show one entry in a warning color without a whole
   separate rendering path.
 - **`TextInput`** — single-line text entry with cursor, optional
-  `numericOnly` mode (radio frequency, timezone offset, etc. fields all
-  use this rather than free text), a configurable max length, and
+  `numericOnly` mode (radio frequency, SF, etc. fields all use this
+  rather than free text), a configurable max length, and
   left-scrolling once typed text exceeds the visible width.
 
 ## Screens
@@ -128,12 +128,12 @@ Each file under [`src/ui/screens/`](../src/ui/screens/) is one
 | `BootScreen` | Boot progress bar + the intro wipe/decrypt animation (see [boot-sequence.md](boot-sequence.md)) |
 | `PasswordScreen` | Setup/unlock password entry, lockout display (see [encryption-identity.md](encryption-identity.md)) |
 | `MigrationWarningScreen` | Legacy-identity migration choice + progress (see [boot-sequence.md](boot-sequence.md)) |
-| `TimezoneScreen` | First-boot/Settings timezone picker — also drives default radio region |
+| `RadioSetupScreen` | First-boot LoRa parameter wizard (region preset + frequency/SF/BW/CR/power) — system time comes from GPS instead of a timezone choice |
 | `NameInputScreen` | First-boot/Settings display name entry |
 | `DataCleanScreen` | First-boot prompt to wipe leftover data from a previous install |
 | `HomeScreen` | Main dashboard — identity, transport/radio status, manual announce |
 | `MessagesScreen` | Conversation list, unread badges, add/remove contact |
 | `MessageView` | Single conversation thread + composer |
 | `NodesScreen` | Discovered/saved peers (backed by `AnnounceManager`, see [announce-discovery.md](announce-discovery.md)) |
-| `SettingsScreen` | Nested settings menus — Radio, WiFi, TCP, SD, Display, Audio, Theme, About |
+| `SettingsScreen` | Nested settings menus — Radio, WiFi, TCP, SD, Display, Audio, Time, Theme, About |
 | `HelpOverlay` | Hotkey reference, rendered as an overlay over whatever screen is active |

@@ -19,11 +19,21 @@ struct NMEAData {
     uint8_t month = 0, day = 0;
     bool timeValid = false;
 
-    // Position (from RMC + GGA)
+    // Position (from RMC + GGA) — only populated when location tracking is on
     double latitude = 0.0;     // decimal degrees, negative = south
     double longitude = 0.0;    // decimal degrees, negative = west
     double altitude = 0.0;     // meters above MSL (from GGA)
     bool locationValid = false;
+
+    // Lat/lon for local-timezone lookup — always parsed from RMC
+    // regardless of the location-tracking opt-in, so local-time display
+    // works even with "Location" off. Used only as an ephemeral lookup
+    // key (see GPSManager::updateLocalTimeZone) — never stored or exposed
+    // as a position the way the opt-in `latitude`/`longitude` pair above
+    // is.
+    double tzLatitude = 0.0;
+    double tzLongitude = 0.0;
+    bool tzPositionUpdated = false;
 
     // Satellites / fix (from GGA)
     uint8_t satellites = 0;
@@ -193,18 +203,32 @@ private:
             return true;
         }
 
-        // Position — only parse if location tracking is enabled
-        if (_parseLocation) {
-            // Latitude: DDMM.MMMM,N/S
-            if (strlen(fields[3]) > 0 && strlen(fields[4]) > 0) {
-                _data.latitude = parseCoord(fields[3]);
-                if (fields[4][0] == 'S') _data.latitude = -_data.latitude;
-            }
+        // Lat/lon are always parsed (independent of the location-tracking
+        // opt-in) so local-time display can be estimated even with
+        // "Location" off — see NMEAData::tzLatitude/tzLongitude.
+        bool haveLat = strlen(fields[3]) > 0 && strlen(fields[4]) > 0;
+        bool haveLon = strlen(fields[5]) > 0 && strlen(fields[6]) > 0;
+        double lat = 0.0, lon = 0.0;
+        if (haveLat) {
+            lat = parseCoord(fields[3]);
+            if (fields[4][0] == 'S') lat = -lat;
+            _data.tzLatitude = lat;
+        }
+        if (haveLon) {
+            lon = parseCoord(fields[5]);
+            if (fields[6][0] == 'W') lon = -lon;
+            _data.tzLongitude = lon;
+        }
+        if (haveLat && haveLon) {
+            _data.tzPositionUpdated = true;
+        }
 
-            // Longitude: DDDMM.MMMM,E/W
-            if (strlen(fields[5]) > 0 && strlen(fields[6]) > 0) {
-                _data.longitude = parseCoord(fields[5]);
-                if (fields[6][0] == 'W') _data.longitude = -_data.longitude;
+        // Position — only expose lat/lon as a "location fix" if the user
+        // opted into location tracking.
+        if (_parseLocation) {
+            if (haveLat) _data.latitude = lat;
+            if (haveLon) {
+                _data.longitude = lon;
                 _data.locationValid = true;
                 _data.locationUpdated = true;
             }

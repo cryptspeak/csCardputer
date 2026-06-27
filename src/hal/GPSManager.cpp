@@ -4,8 +4,21 @@
 
 #include <sys/time.h>
 #include <time.h>
+#include <cmath>
+#include "hal/TimeZoneDB.h"
 
 constexpr uint32_t GPSManager::BAUD_RATES[];
+
+// Converts civil date to days since 1970-01-01 (Howard Hinnant algorithm) —
+// avoids mktime() TZ contamination and timegm() unavailability on ESP32.
+static int32_t daysFromCivil(int y, int m, int d) {
+    y -= (m <= 2);
+    int era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (int32_t)doe - 719468;
+}
 
 void GPSManager::begin() {
     if (_running) return;
@@ -80,6 +93,17 @@ void GPSManager::loop() {
         }
     }
 
+    // Check for a new position sample — re-estimate the local timezone.
+    // Independent of the time-sync gating above: this only needs a valid
+    // RMC fix, not satellite-verified time. Skipped entirely while a
+    // manual offset override is active.
+    if (d.tzPositionUpdated) {
+        d.tzPositionUpdated = false;
+        if (!_manualOverride) {
+            updateLocalTimeZone(d.tzLatitude, d.tzLongitude, d.month);
+        }
+    }
+
     // Check for new location data
     if (d.locationUpdated) {
         d.locationUpdated = false;
@@ -126,17 +150,6 @@ void GPSManager::syncSystemTime() {
     }
 
     // Convert GPS UTC date/time to Unix epoch using arithmetic
-    // (avoids mktime() TZ contamination and timegm() unavailability on ESP32)
-    auto daysFromCivil = [](int y, int m, int d) -> int32_t {
-        // Converts civil date to days since 1970-01-01 (Howard Hinnant algorithm)
-        y -= (m <= 2);
-        int era = (y >= 0 ? y : y - 399) / 400;
-        unsigned yoe = (unsigned)(y - era * 400);
-        unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-        unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-        return era * 146097 + (int32_t)doe - 719468;
-    };
-
     int32_t days = daysFromCivil(d.year, d.month, d.day);
     time_t epoch = (time_t)days * 86400 + d.hour * 3600 + d.minute * 60 + d.second;
     if (epoch < 1700000000) {
@@ -162,11 +175,83 @@ void GPSManager::syncSystemTime() {
                   (unsigned long)_timeSyncCount, (int)d.satellites);
 }
 
+// Fallback for positions TimeZoneDB doesn't cover — guesses whether DST is
+// in effect from hemisphere + month. There's no per-country ruleset (some
+// countries don't observe DST at all), just a rough "is it summer where
+// you are" check with month-granularity, not exact transition dates:
+//   - Northern hemisphere: DST roughly Apr-Oct.
+//   - Southern hemisphere: DST roughly Oct-Mar (their summer).
+static int8_t guessDstHours(bool southernHemisphere, uint8_t month) {
+    if (month < 1 || month > 12) return 0;  // no date yet
+    bool dstSeason = southernHemisphere
+        ? (month <= 3 || month >= 10)
+        : (month >= 4 && month <= 10);
+    return dstSeason ? 1 : 0;
+}
+
+// Re-derives the active POSIX TZ string from a GPS fix: a TimeZoneDB box
+// match (real DST rules) if one covers this position, otherwise a coarse
+// longitude/15 + hemisphere/month DST guess. No-op while a manual offset
+// override is active (see setManualOffset()).
+void GPSManager::updateLocalTimeZone(double latitude, double longitude, uint8_t month) {
+    const char* dbMatch = lookupPosixTZ(latitude, longitude);
+    if (dbMatch) {
+        applyPosixTZ(dbMatch);
+        return;
+    }
+
+    int offset = (int)lround(longitude / 15.0) + guessDstHours(latitude < 0, month);
+    if (offset < -12) offset = -12;
+    if (offset > 14) offset = 14;
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "UTC%d", -offset);
+    applyPosixTZ(buf);
+}
+
+// Applies a POSIX TZ string (from TimeZoneDB, the longitude fallback, or a
+// manual override), updates the derived hour offset used for display/NVS,
+// and skips the setenv/tzset() round-trip if nothing actually changed.
+void GPSManager::applyPosixTZ(const char* tz) {
+    if (strncmp(tz, _posixTZ, sizeof(_posixTZ)) == 0) return;
+
+    strncpy(_posixTZ, tz, sizeof(_posixTZ) - 1);
+    _posixTZ[sizeof(_posixTZ) - 1] = '\0';
+    setenv("TZ", _posixTZ, 1);
+    tzset();
+
+    // This newlib doesn't expose struct tm::tm_gmtoff, so derive the
+    // current offset the portable way: take the UTC calendar reading,
+    // reinterpret those same field values as a *local* wall-clock time
+    // (mktime, with tm_isdst=-1 so it consults the active TZ rule rather
+    // than assuming standard time), and diff the resulting epoch against
+    // the real one. That difference is exactly the local-minus-UTC offset
+    // (negative west, positive east), already DST-adjusted for "now".
+    time_t now = time(nullptr);
+    struct tm utcTm;
+    gmtime_r(&now, &utcTm);
+    utcTm.tm_isdst = -1;
+    time_t asLocal = mktime(&utcTm);
+    _localOffsetHours = (int8_t)((now - asLocal) / 3600);
+
+    Serial.printf("[GPS] Local timezone applied: %s (UTC%+d)\n", _posixTZ, _localOffsetHours);
+}
+
+void GPSManager::setManualOffset(bool enabled, int8_t offsetHours) {
+    _manualOverride = enabled;
+    if (!enabled) return;  // next GPS fix will naturally re-estimate
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "UTC%d", -offsetHours);
+    applyPosixTZ(buf);
+}
+
 void GPSManager::restoreTimeFromNVS() {
     Preferences prefs;
     if (!prefs.begin(NVS_NAMESPACE, true)) return;  // read-only
 
     int64_t storedEpoch = prefs.getLong64("epoch", 0);
+    String storedTz = prefs.getString("tz_str", "UTC0");
     prefs.end();
 
     if (storedEpoch > 1700000000) {
@@ -175,9 +260,10 @@ void GPSManager::restoreTimeFromNVS() {
         tv.tv_usec = 0;
         settimeofday(&tv, nullptr);
 
-        // Set TZ
-        setenv("TZ", _posixTZ, 1);
-        tzset();
+        // Restore the last-known timezone (full DST-rule string if a
+        // TimeZoneDB match was active) so the stale time still displays
+        // correctly until a fresh GPS fix re-estimates it.
+        applyPosixTZ(storedTz.c_str());
 
         time_t now = time(nullptr);
         struct tm* local = localtime(&now);
@@ -200,6 +286,7 @@ void GPSManager::persistToNVS() {
     if (!prefs.begin(NVS_NAMESPACE, false)) return;  // read-write
 
     prefs.putLong64("epoch", (int64_t)now);
+    prefs.putString("tz_str", _posixTZ);
 
     const NMEAData& d = _parser.data();
     if (d.locationValid) {
@@ -210,11 +297,6 @@ void GPSManager::persistToNVS() {
     }
 
     prefs.end();
-}
-
-void GPSManager::setPosixTZ(const char* tz) {
-    strncpy(_posixTZ, tz, sizeof(_posixTZ) - 1);
-    _posixTZ[sizeof(_posixTZ) - 1] = '\0';
 }
 
 #endif // HAS_GPS

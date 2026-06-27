@@ -77,8 +77,23 @@ void SettingsScreen::buildMainMenu() {
     _list.addItem("SD Card");
     _list.addItem("Display");
     _list.addItem("Audio");
+    _list.addItem("Time");
     _list.addItem("About");
     _list.addItem("Factory Reset", Theme::ERROR);
+}
+
+void SettingsScreen::buildTimeMenu() {
+    _list.clear();
+    if (!_config) return;
+    auto& s = _config->settings();
+
+    _list.addItem(s.manualTimezoneEnabled ? "Time Source: Manual" : "Time Source: Auto (GPS)");
+    if (s.manualTimezoneEnabled) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "UTC Offset: %+d", s.manualUtcOffsetHours);
+        _list.addItem(buf);
+    }
+    _list.addItem("< Back");
 }
 
 void SettingsScreen::buildRadioMenu() {
@@ -659,6 +674,13 @@ void SettingsScreen::commitEdit(const std::string& value) {
         }
         applyAndSave();
         buildAudioMenu();
+    } else if (_subMenu == MENU_TIME) {
+        if (_editField == 1) {
+            int v = atoi(value.c_str());
+            if (v >= -12 && v <= 14) s.manualUtcOffsetHours = (int8_t)v;
+        }
+        applyAndSave();
+        buildTimeMenu();
     } else if (_subMenu == MENU_THEME_CUSTOM) {
         // Exactly 6 hex digits or reject outright (previous color kept) —
         // no silent coercion of a malformed/truncated value.
@@ -750,7 +772,7 @@ void SettingsScreen::render(M5Canvas& canvas) {
     // Header with accent bar
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
                              "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN", "THEME",
-                             "SCREEN", "CUSTOM THEME", "MIX COLOR"};
+                             "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME"};
     const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
@@ -1028,8 +1050,9 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                 case 2: _subMenu = MENU_SDCARD; buildSDCardMenu(); break;
                 case 3: _subMenu = MENU_DISPLAY; buildDisplayMenu(); break;
                 case 4: _subMenu = MENU_AUDIO; buildAudioMenu(); break;
-                case 5: _subMenu = MENU_ABOUT; break;
-                case 6: _confirmPending = true; _confirmAction = 0; break;
+                case 5: _subMenu = MENU_TIME; buildTimeMenu(); break;
+                case 6: _subMenu = MENU_ABOUT; break;
+                case 7: _confirmPending = true; _confirmAction = 0; break;
             }
             return true;
         }
@@ -1128,6 +1151,25 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             applyAndSave();
             buildAudioMenu();
             return true;
+        }
+
+        // Time menu: item 0 toggles manual override; item 1 (only present
+        // while manual is on) edits the UTC offset.
+        if (_subMenu == MENU_TIME) {
+            auto& s = _config->settings();
+            if (sel == 0) {
+                s.manualTimezoneEnabled = !s.manualTimezoneEnabled;
+                applyAndSave();
+                buildTimeMenu();
+                return true;
+            }
+            if (sel == 1 && s.manualTimezoneEnabled) {
+                char buf[8];
+                snprintf(buf, sizeof(buf), "%d", s.manualUtcOffsetHours);
+                startEditing(1, buf, "UTC Offset (-12 to 14):");
+                return true;
+            }
+            return true;  // Back (last item) handled above
         }
 
         // Cycle WiFi mode (item 0 in WiFi menu)
@@ -1305,6 +1347,14 @@ void SettingsScreen::applyAndSave() {
         _audio->setEnabled(s.audioEnabled);
         _audio->setVolume(s.audioVolume);
     }
+
+#if HAS_GPS
+    // Apply timezone override (no-op if manual mode is off — GPS keeps
+    // estimating on its own)
+    if (_gps) {
+        _gps->setManualOffset(s.manualTimezoneEnabled, s.manualUtcOffsetHours);
+    }
+#endif
 
     Serial.println("[SETTINGS] Saved and applied");
     if (!_toastMessage) showToast("Saved!");

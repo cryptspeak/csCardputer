@@ -15,6 +15,10 @@
 #include "transport/TCPClientInterface.h"
 #include "reticulum/ReticulumManager.h"
 #include "input/Keyboard.h"
+#include "config/Config.h"
+#if HAS_GPS
+#include "hal/GPSManager.h"
+#endif
 #include <vector>
 
 class SettingsScreen : public Screen {
@@ -37,6 +41,9 @@ public:
     void setTCPClients(std::vector<TCPClientInterface*>* clients) { _tcpClients = clients; }
     void setRNS(ReticulumManager* rns) { _rns = rns; }
     void setIdentityHash(const String& hash) { _identityHash = hash; }
+#if HAS_GPS
+    void setGPS(GPSManager* gps) { _gps = gps; }
+#endif
 
     // Callback for back navigation
     using BackCallback = std::function<void()>;
@@ -45,7 +52,7 @@ public:
 private:
     enum SubMenu { MENU_MAIN, MENU_RADIO, MENU_WIFI, MENU_TCP, MENU_SDCARD,
                    MENU_DISPLAY, MENU_AUDIO, MENU_ABOUT, MENU_WIFI_SCAN, MENU_THEME,
-                   MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER };
+                   MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER, MENU_TIME };
 
     void buildMainMenu();
     void buildRadioMenu();
@@ -56,6 +63,7 @@ private:
     void buildDisplayMenu();
     void buildDisplayScreenMenu();
     void buildAudioMenu();
+    void buildTimeMenu();
     void buildThemeMenu();
     void buildThemeCustomMenu();
     void applyThemePreset(int index);
@@ -95,6 +103,9 @@ private:
     std::vector<TCPClientInterface*>* _tcpClients = nullptr;
     ReticulumManager* _rns = nullptr;
     String _identityHash;
+#if HAS_GPS
+    GPSManager* _gps = nullptr;
+#endif
 
     SubMenu _subMenu = MENU_MAIN;
     ScrollList _list;

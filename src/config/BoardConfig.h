@@ -43,7 +43,7 @@
 #define DISPLAY_WIDTH   240
 #define DISPLAY_HEIGHT  135
 
-// --- GNSS (UART — reserved for v1.1) ---
+// --- GNSS (UART — primary time source, see hal/GPSManager) ---
 #define GPS_RX      15   // GPS TX -> ESP RX
 #define GPS_TX      13   // GPS RX <- ESP TX
 #define GPS_BAUD    115200

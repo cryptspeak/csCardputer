@@ -35,7 +35,7 @@
 #include "ui/screens/NameInputScreen.h"
 #include "ui/screens/DataCleanScreen.h"
 #include "ui/screens/HelpOverlay.h"
-#include "ui/screens/TimezoneScreen.h"
+#include "ui/screens/RadioSetupScreen.h"
 #include "ui/screens/PasswordScreen.h"
 #include "reticulum/IdentityCrypto.h"
 #include "power/PowerManager.h"
@@ -100,7 +100,7 @@ MessageView messageView;
 NameInputScreen nameInputScreen;
 DataCleanScreen dataCleanScreen;
 SettingsScreen settingsScreen;
-TimezoneScreen timezoneScreen;
+RadioSetupScreen radioSetupScreen;
 HelpOverlay helpOverlay;
 PasswordScreen passwordScreen;
 MigrationWarningScreen migrationScreen;
@@ -181,15 +181,15 @@ static void beginSTAConnection() {
     Serial.printf("[WIFI] STA begin (SSID: %s)\n", s.wifiSTASSID.c_str());
 }
 
+// Time comes from GPS — see GPSManager for how the active POSIX TZ string
+// is derived (TimeZoneDB match, longitude/season fallback, or a manual
+// override from Settings). Falls back to UTC before the first fix.
 static const char* currentPosixTZ() {
-    if (userConfig.settings().timezoneSet &&
-        userConfig.settings().timezoneIdx < TIMEZONE_COUNT) {
-        return TIMEZONE_TABLE[userConfig.settings().timezoneIdx].posixTZ;
-    }
-
-    static char tz[16];
-    snprintf(tz, sizeof(tz), "UTC%d", -userConfig.settings().utcOffset);
-    return tz;
+#if HAS_GPS
+    return gps.posixTZ();
+#else
+    return "UTC0";
+#endif
 }
 
 // =============================================================================
@@ -1283,20 +1283,16 @@ void setup() {
     // Initialize GPS (Cap LoRa-1262 GNSS module)
 #if HAS_GPS
     if (userConfig.settings().gpsTimeEnabled || userConfig.settings().gpsLocationEnabled) {
-        // Use POSIX TZ from timezone table if set, otherwise simple UTC offset
-        if (userConfig.settings().timezoneSet && userConfig.settings().timezoneIdx < TIMEZONE_COUNT) {
-            gps.setPosixTZ(TIMEZONE_TABLE[userConfig.settings().timezoneIdx].posixTZ);
-        } else {
-            char tz[16];
-            snprintf(tz, sizeof(tz), "UTC%d", -userConfig.settings().utcOffset);
-            gps.setPosixTZ(tz);
-        }
         gps.setLocationEnabled(userConfig.settings().gpsLocationEnabled);
         gps.begin();
         Serial.println("[GPS] GNSS module started");
     } else {
         Serial.println("[GPS] Disabled by config");
     }
+    // Manual timezone override (Settings > Time) — applied after begin()
+    // so it wins over whatever NVS-restored estimate begin() just set.
+    gps.setManualOffset(userConfig.settings().manualTimezoneEnabled,
+                         userConfig.settings().manualUtcOffsetHours);
 #endif
 
     // Initialize power manager + audio
@@ -1363,6 +1359,12 @@ void setup() {
     settingsScreen.setTCPClients(&tcpClients);
     settingsScreen.setRNS(&rns);
     settingsScreen.setIdentityHash(rns.destinationHashHex());
+#if HAS_GPS
+    settingsScreen.setGPS(&gps);
+#endif
+
+    radioSetupScreen.setUserConfig(&userConfig);
+    radioSetupScreen.setRadio(&radio);
 
     tabScreens[TabBar::TAB_HOME]  = &homeScreen;
     tabScreens[TabBar::TAB_MSGS]  = &messagesScreen;
@@ -1421,32 +1423,10 @@ void setup() {
         finalizeBoot();
     });
 
-    // Timezone selection callback — apply TZ, then proceed to name or home
-    timezoneScreen.setDoneCallback([=](int tzIdx) {
-        userConfig.settings().timezoneIdx = (uint8_t)tzIdx;
-        userConfig.settings().utcOffset = TIMEZONE_TABLE[tzIdx].baseOffset;
-        userConfig.settings().timezoneSet = true;
-
-        // Apply timezone immediately
-        setenv("TZ", TIMEZONE_TABLE[tzIdx].posixTZ, 1);
-        tzset();
-#if HAS_GPS
-        if (gps.isRunning()) gps.setPosixTZ(TIMEZONE_TABLE[tzIdx].posixTZ);
-#endif
-
-        // Auto-set radio region + frequency from timezone
-        uint8_t tzRegion = TIMEZONE_TABLE[tzIdx].radioRegion;
-        userConfig.settings().radioRegion = tzRegion;
-        userConfig.settings().loraFrequency = REGION_FREQ[tzRegion];
-        // Apply to hardware immediately
-        if (radioOnline) {
-            radio.setFrequency(REGION_FREQ[tzRegion]);
-            radio.receive();
-        }
-        Serial.printf("[BOOT] Timezone set: %s (UTC%+d), radio region: %s (%lu MHz)\n",
-                      TIMEZONE_TABLE[tzIdx].label, TIMEZONE_TABLE[tzIdx].baseOffset,
-                      REGION_LABELS[tzRegion], (unsigned long)(REGION_FREQ[tzRegion] / 1000000));
-
+    // Radio setup callback — params already applied live as the user edits
+    // them; just mark setup done and proceed to name or home.
+    radioSetupScreen.setDoneCallback([=]() {
+        userConfig.settings().radioConfigured = true;
         saveConfig();
 
         // If no display name yet, go to name input next
@@ -1457,28 +1437,22 @@ void setup() {
         }
     });
 
-    Serial.printf("[BOOT] displayName='%s' tzSet=%d wifiMode=%d\n",
+    Serial.printf("[BOOT] displayName='%s' radioConfigured=%d wifiMode=%d\n",
         userConfig.settings().displayName.c_str(),
-        (int)userConfig.settings().timezoneSet,
+        (int)userConfig.settings().radioConfigured,
         (int)userConfig.settings().wifiMode);
 
     // Decide which screen to show first
-    if (!userConfig.settings().timezoneSet) {
-        // Timezone not set — show picker first
-        timezoneScreen.setSelectedIndex(userConfig.settings().timezoneIdx);
-        ui.setScreen(&timezoneScreen);
-        Serial.println("[BOOT] Showing timezone picker");
+    if (!userConfig.settings().radioConfigured) {
+        // Radio not configured — show LoRa setup wizard first
+        ui.setScreen(&radioSetupScreen);
+        Serial.println("[BOOT] Showing radio setup wizard");
     } else if (userConfig.settings().displayName.isEmpty()) {
-        // Timezone set but no name — show name input
+        // Radio configured but no name — show name input
         ui.setScreen(&nameInputScreen);
         Serial.println("[BOOT] Showing name input");
     } else {
         // Everything set — go straight to home
-        // Apply saved timezone
-        if (userConfig.settings().timezoneIdx < TIMEZONE_COUNT) {
-            setenv("TZ", TIMEZONE_TABLE[userConfig.settings().timezoneIdx].posixTZ, 1);
-            tzset();
-        }
         finalizeBoot();
     }
 
