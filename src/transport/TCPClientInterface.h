@@ -51,12 +51,12 @@ private:
     uint16_t _port;
     unsigned long _lastAttempt = 0;
     unsigned long _lastRxTime = 0;
-    // Shared static buffers — only one TCP connection is active at a time in the main loop
-    // Saves ~8KB per additional connection vs per-instance allocation
-    static uint8_t* _rxBuffer;
-    static uint8_t* _txBuffer;
-    static uint8_t* _wrapBuffer;
-    static bool _buffersAllocated;
+    // Per-instance buffers — multiple TCPClientInterface instances run concurrently
+    // (one per configured hub, up to MAX_TCP_CONNECTIONS), so these can't be shared/static
+    // without one connection's in-flight frame corrupting another's.
+    uint8_t* _rxBuffer = nullptr;
+    uint8_t* _txBuffer = nullptr;
+    uint8_t* _wrapBuffer = nullptr;
     static constexpr size_t RX_BUFFER_SIZE = 2048;
     static constexpr size_t TX_BUFFER_SIZE = RX_BUFFER_SIZE * 2 + 2;
 

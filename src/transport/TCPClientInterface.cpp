@@ -1,12 +1,6 @@
 #include "TCPClientInterface.h"
 #include "config/Config.h"
 
-// Shared buffers — allocated once, used by all TCP connections sequentially
-uint8_t* TCPClientInterface::_rxBuffer = nullptr;
-uint8_t* TCPClientInterface::_txBuffer = nullptr;
-uint8_t* TCPClientInterface::_wrapBuffer = nullptr;
-bool TCPClientInterface::_buffersAllocated = false;
-
 TCPClientInterface::TCPClientInterface(const char* host, uint16_t port, const char* name)
     : RNS::InterfaceImpl(name), _host(host), _port(port)
 {
@@ -14,16 +8,14 @@ TCPClientInterface::TCPClientInterface(const char* host, uint16_t port, const ch
     _OUT = true;
     _bitrate = 1000000;
     _HW_MTU = 500;
-    // Allocate shared buffers once — all TCP connections share them
-    if (!_buffersAllocated) {
-        _rxBuffer = (uint8_t*)malloc(RX_BUFFER_SIZE);
-        _txBuffer = (uint8_t*)malloc(TX_BUFFER_SIZE);
-        _wrapBuffer = (uint8_t*)malloc(RX_BUFFER_SIZE);
-        if (!_rxBuffer || !_txBuffer || !_wrapBuffer) {
-            Serial.println("[TCP] FATAL: buffer allocation failed — interface disabled");
-            _online = false;
-        }
-        _buffersAllocated = true;
+    // Per-instance buffers — each concurrently configured hub gets its own,
+    // so one connection's in-flight frame can't corrupt another's.
+    _rxBuffer = (uint8_t*)malloc(RX_BUFFER_SIZE);
+    _txBuffer = (uint8_t*)malloc(TX_BUFFER_SIZE);
+    _wrapBuffer = (uint8_t*)malloc(RX_BUFFER_SIZE);
+    if (!_rxBuffer || !_txBuffer || !_wrapBuffer) {
+        Serial.println("[TCP] FATAL: buffer allocation failed — interface disabled");
+        _online = false;
     }
 }
 
@@ -35,7 +27,9 @@ TCPClientInterface::~TCPClientInterface() {
         waitForConnectTask();
     }
     if (_client.connected()) _client.stop();
-    // Don't free shared buffers — they persist for the lifetime of the device
+    if (_rxBuffer) { free(_rxBuffer); _rxBuffer = nullptr; }
+    if (_txBuffer) { free(_txBuffer); _txBuffer = nullptr; }
+    if (_wrapBuffer) { free(_wrapBuffer); _wrapBuffer = nullptr; }
 }
 
 bool TCPClientInterface::start() {
@@ -155,16 +149,22 @@ void TCPClientInterface::loop() {
             _lastRxTime = millis();
             _hubRxCount++;
 
-            // Learn hub transport_id from incoming Header2 packets (once per connection)
+            // Learn hub transport_id from incoming Header2 packets. Re-learn if it
+            // ever changes mid-connection (e.g. hub regenerates its identity without
+            // dropping the TCP socket) — otherwise outgoing Header2 wraps would keep
+            // silently using a stale id the hub no longer recognizes.
             if (len >= 35) {
                 uint8_t flags = _rxBuffer[0];
                 uint8_t header_type = (flags >> 6) & 0x01;
-                if (header_type == 1 && !_hubTransportIdKnown) {
+                if (header_type == 1 &&
+                    (!_hubTransportIdKnown || memcmp(_rxBuffer + 2, _hubTransportId, 16) != 0)) {
+                    bool changed = _hubTransportIdKnown;
                     memcpy(_hubTransportId, _rxBuffer + 2, 16);
                     _hubTransportIdKnown = true;
                     char hex[33];
                     for (int j = 0; j < 16; j++) sprintf(hex + j*2, "%02x", _hubTransportId[j]);
-                    Serial.printf("[TCP] Learned hub transport_id: %.8s\n", hex);
+                    Serial.printf("[TCP] %s hub transport_id: %.8s\n",
+                                  changed ? "Hub transport_id changed, relearned" : "Learned", hex);
                 }
             }
 
