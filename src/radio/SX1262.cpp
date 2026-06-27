@@ -242,7 +242,15 @@ bool SX1262::calibrate_image(uint32_t frequency) {
 
     if (_imageCalBand == band) return true;
 
-    standby();
+    // CalibrateImage must be issued from STDBY_RC per datasheet, same as
+    // Calibrate() above. standby() would enter STDBY_XOSC on this TCXO
+    // board, which leaves the image/PLL calibration for the new band
+    // invalid — symptom: after switching bands (e.g. Americas -> Europe),
+    // SetRfFrequency below appears to apply, but the chip stays locked on
+    // the previously-calibrated band's frequency until a later call skips
+    // this (now band-cached) step and re-issues a clean SetRfFrequency.
+    uint8_t mode_byte = MODE_STDBY_RC_6X;
+    executeOpcode(OP_STANDBY_6X, &mode_byte, 1);
     executeOpcode(OP_CALIBRATE_IMAGE_6X, image_freq, 2);
     waitOnBusy();
     _imageCalBand = band;
