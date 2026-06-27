@@ -139,19 +139,25 @@ endpoints, each independently toggleable via `autoConnect`).
 - **Header2 transport-ID wrapping.** Reticulum's TCP transport uses an
   extra "Header2" framing layer (a 16-byte hub transport ID prepended
   to data packets) that this client learns passively from the hub's
-  first incoming Header2 packet rather than needing it configured.
-  Announces and link packets bypass this wrapping; only ordinary data
-  packets get it.
+  first incoming Header2 packet rather than needing it configured, and
+  re-learns if a later incoming Header2 packet carries a different id
+  (e.g. the hub regenerates its identity without dropping the TCP
+  socket) so outgoing wraps never keep using a stale id. Announces and
+  link packets bypass this wrapping; only ordinary data packets get it.
 - **Keepalive-via-timeout.** `TCP_KEEPALIVE_TIMEOUT_MS` (120 seconds,
   chosen to survive typical mobile-NAT idle timeouts) is not a TCP
   keepalive option — it's an application-level "no bytes received in
   this long → force a reconnect" check in `loop()`.
-- **Shared RX/TX buffers.** `_rxBuffer`, `_txBuffer`, and `_wrapBuffer`
-  (`TCPClientInterface.h`) are `static`, allocated once on first use
-  and shared across every `TCPClientInterface` instance, as a heap-
-  saving choice (~8KB saved per additional configured hub) — see the
-  comment above the declarations for the assumption this design is
-  built on.
+- **Per-instance RX/TX buffers.** `_rxBuffer`, `_txBuffer`, and
+  `_wrapBuffer` (`TCPClientInterface.h`) are allocated per instance in
+  the constructor and freed in the destructor. They used to be `static`
+  and shared across every `TCPClientInterface` instance to save ~8KB
+  per additional configured hub, but that's unsafe with more than one
+  hub connected at once (`main.cpp`'s `reloadTCPClients()` can run up to
+  `MAX_TCP_CONNECTIONS` simultaneously): one connection's in-flight
+  frame would silently corrupt another's. Per-instance buffers cost the
+  ~8KB/hub the sharing saved, but correctness wins given this is a
+  reachable multi-hub configuration, not a hypothetical.
 
 ## AutoInterfaceWrapper
 
