@@ -130,6 +130,37 @@ void LoRaInterface::loop() {
         if (!_radio->isTxBusy()) {
             _txPending = false;
 
+            // Async TX timed out in the radio (not just a delayed loop() poll —
+            // isTxBusy() already accounts for that). Retry the whole original
+            // packet once before giving up; _txData holds it unsplit regardless
+            // of whether this was frame 1 or frame 2 of a split send.
+            if (_radio->lastTxFailed()) {
+                _splitTxPending = false;
+                _splitTxRemaining = RNS::Bytes();
+
+                if (!_txRetried && !_txData.empty()) {
+                    _txRetried = true;
+                    Serial.println("[LORA_IF] TX timed out, retrying once");
+                    RNS::Bytes retryData = _txData;
+                    transmitNow(retryData);
+                    return;
+                }
+
+                Serial.println("[LORA_IF] TX timed out after retry, dropping packet");
+                _txRetried = false;
+                _txData = RNS::Bytes();
+
+                if (!_txQueue.empty()) {
+                    RNS::Bytes next = _txQueue.front();
+                    _txQueue.pop_front();
+                    transmitNow(next);
+                } else {
+                    _radio->receive();
+                }
+                return;
+            }
+            _txRetried = false;
+
             // If split TX pending, send the second frame immediately
             if (_splitTxPending) {
                 _splitTxPending = false;

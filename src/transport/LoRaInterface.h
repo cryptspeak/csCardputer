@@ -32,6 +32,7 @@ private:
     SX1262* _radio;
     bool _txPending = false;
     RNS::Bytes _txData;
+    bool _txRetried = false;  // one-shot retry on async TX timeout
 
     // TX queue: buffer packets when radio is busy instead of dropping
     static constexpr int TX_QUEUE_MAX = 4;
