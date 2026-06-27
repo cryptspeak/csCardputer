@@ -1015,13 +1015,6 @@ void setup() {
     hotkeys.registerHotkey('d', "Diagnostics", onHotkeyDiag);
     hotkeys.registerHotkey('t', "Radio Test", onHotkeyRadioTest);
     hotkeys.registerHotkey('r', "RSSI Monitor", onHotkeyRssiMonitor);
-    hotkeys.setTabCycleCallback([](int dir) {
-        ui.tabBar().cycleTab(dir);
-        int tab = ui.tabBar().getActiveTab();
-        if (tabScreens[tab]) {
-            ui.setScreen(tabScreens[tab]);
-        }
-    });
     bootScreen.setProgress(0.2f, "Hotkeys registered");
     ui.render();
 
@@ -1554,7 +1547,7 @@ void loop() {
         }
     }
 
-    // 2. Reticulum + radio (throttled — 200Hz active, 20Hz screen off)
+    // 2. Reticulum + radio (throttled — 100Hz active, 20Hz screen off)
     unsigned long rnsDuration = 0;
     if (now - lastRNS >= rnsInterval) {
         lastRNS = now;
@@ -1728,14 +1721,14 @@ void loop() {
     // 10. Power management
     power.loop();
 
-    // 9. Power-aware RNS throttle
+    // 11. Power-aware RNS throttle
     if (power.state() == PowerManager::SCREEN_OFF) {
         rnsInterval = 50;  // 20 Hz when screen off
     } else {
-        rnsInterval = RNS_INTERVAL_MS;  // 200 Hz when active
+        rnsInterval = RNS_INTERVAL_MS;  // 100 Hz when active
     }
 
-    // 10. Render (20 FPS, skip if screen off or dimmed-frozen)
+    // 12. Render (20 FPS, skip if screen off or dimmed-frozen)
     if (now - lastRender >= RENDER_INTERVAL_MS) {
         lastRender = now;
         if (power.isScreenOn() && power.state() != PowerManager::DIMMED) {
@@ -1758,7 +1751,7 @@ void loop() {
         }
     }
 
-    // 11. Heartbeat (5s)
+    // 13. Heartbeat (5s)
     {
         unsigned long cycleTime = now - loopCycleStart;
         if (cycleTime > maxLoopTime) maxLoopTime = cycleTime;

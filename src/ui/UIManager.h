@@ -56,7 +56,6 @@ private:
     TabBar _tabBar;
     Screen* _currentScreen = nullptr;
     Screen* _overlay = nullptr;
-    bool _needsRender = true;
     bool _bootMode = false;
     bool _statusDirty = true;
     bool _contentDirty = true;

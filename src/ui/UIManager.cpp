@@ -12,7 +12,6 @@ void UIManager::begin() {
     Serial.printf("[UI] Canvas: 8-bit truecolor, %d bytes\n", Theme::SCREEN_W * Theme::SCREEN_H);
     Theme::useSmallFont(_canvas);
     _canvas.fillScreen(Theme::BG);
-    _needsRender = true;
     _statusDirty = true;
     _contentDirty = true;
     _tabDirty = true;
