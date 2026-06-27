@@ -5,7 +5,7 @@ DIST_DIR               ?= dist
 STANDALONE_NAME        := rscardputer-standalone
 STANDALONE_BIN         := $(BUILD_DIR)/$(STANDALONE_NAME).bin
 STANDALONE_APP_BIN     := .pio/build/$(STANDALONE_ENV)/firmware.bin
-STANDALONE_FACTORY_BIN := rscardputer-standalone-factory.bin
+STANDALONE_FACTORY_BIN := .pio/build/$(STANDALONE_ENV)/rscardputer-standalone-factory.bin
 
 PORT ?= $(port)
 ifeq ($(PORT),)

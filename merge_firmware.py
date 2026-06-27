@@ -9,13 +9,15 @@ import shlex
 
 def merge_bin(source, target, env):
     build_dir = env.subst("$BUILD_DIR")
-    project_dir = env.subst("$PROJECT_DIR")
 
     # boot_app0.bin lives in the Arduino framework tools
     framework_dir = env.PioPlatform().get_package_dir("framework-arduinoespressif32")
     boot_app0 = os.path.join(framework_dir, "tools", "partitions", "boot_app0.bin")
 
-    output = os.path.join(project_dir, "rscardputer-standalone-factory.bin")
+    # Lives alongside the other PlatformIO build outputs (.pio/build/<env>/)
+    # instead of the project root, so it doesn't show up as a stray file
+    # next to source files.
+    output = os.path.join(build_dir, "rscardputer-standalone-factory.bin")
 
     # Invoke PlatformIO's own bundled esptool.py script directly rather than
     # "python -m esptool" — esptool isn't necessarily installed as an
