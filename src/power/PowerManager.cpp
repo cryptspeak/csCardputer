@@ -16,6 +16,12 @@ void PowerManager::activity() {
 void PowerManager::loop() {
     unsigned long elapsed = millis() - _lastActivity;
 
+    if (_autoLockTimeoutMs > 0 && elapsed >= _autoLockTimeoutMs) {
+        Serial.println("[POWER] Auto-lock timeout reached — rebooting to password screen");
+        delay(300);
+        ESP.restart();
+    }
+
     switch (_state) {
         case ACTIVE:
             if (_offTimeout > 0 && elapsed >= _offTimeout) {

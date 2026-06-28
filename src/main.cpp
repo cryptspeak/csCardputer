@@ -1317,6 +1317,7 @@ void setup() {
     power.setDimTimeout(userConfig.settings().screenDimTimeout);
     power.setOffTimeout(userConfig.settings().screenOffTimeout);
     power.setBrightness(userConfig.settings().brightness);
+    power.setAutoLockTimeout(userConfig.settings().autoLockMinutes);
 
     audio.setEnabled(userConfig.settings().audioEnabled);
     audio.setVolume(userConfig.settings().audioVolume);

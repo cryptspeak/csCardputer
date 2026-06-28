@@ -54,7 +54,7 @@ private:
     enum SubMenu { MENU_MAIN, MENU_RADIO, MENU_WIFI, MENU_TCP, MENU_SDCARD,
                    MENU_DISPLAY, MENU_AUDIO, MENU_ABOUT, MENU_WIFI_SCAN, MENU_THEME,
                    MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER, MENU_TIME,
-                   MENU_SECURITY };
+                   MENU_SECURITY, MENU_AUTOLOCK };
 
     void buildMainMenu();
     void buildRadioMenu();
@@ -67,6 +67,7 @@ private:
     void buildAudioMenu();
     void buildTimeMenu();
     void buildSecurityMenu();
+    void buildAutoLockMenu();
     void startDuressSetup();
     void cancelDuressSetup();
     void onDuressInputSubmit(const std::string& value);

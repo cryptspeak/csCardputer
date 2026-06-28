@@ -99,6 +99,28 @@ void SettingsScreen::buildTimeMenu() {
     _list.addItem("< Back");
 }
 
+// Auto-lock preset list — fixed minute values selectable from the menu
+// (see buildAutoLockMenu()). 0 = disabled. Kept as a single table so the
+// status label (buildSecurityMenu) and the picker (buildAutoLockMenu) can
+// never drift out of sync with each other.
+struct AutoLockOption { uint16_t minutes; const char* label; };
+static const AutoLockOption kAutoLockOptions[] = {
+    {30,  "30 min"},
+    {60,  "1 hour"},
+    {240, "4 hours"},
+    {480, "8 hours"},
+    {720, "12 hours"},
+    {0,   "Disabled"},
+};
+static constexpr int kAutoLockOptionCount = sizeof(kAutoLockOptions) / sizeof(kAutoLockOptions[0]);
+
+static const char* autoLockLabel(uint16_t minutes) {
+    for (auto& o : kAutoLockOptions) {
+        if (o.minutes == minutes) return o.label;
+    }
+    return "Disabled";
+}
+
 // Duress password: a second password that, entered at the unlock screen
 // instead of the real one, wipes the device instead of unlocking it. There
 // is no plaintext "enabled" flag — the row's label and this submenu both
@@ -111,6 +133,27 @@ void SettingsScreen::buildSecurityMenu() {
                               : "Duress Password: Disabled");
     if (configured) {
         _list.addItem("Reset Duress Password");
+    }
+    if (_config) {
+        std::string label = "Auto-Lock: " + std::string(autoLockLabel(_config->settings().autoLockMinutes));
+        _list.addItem(label);
+    }
+    _list.addItem("< Back");
+}
+
+// Auto-lock: reboots the device back to the at-rest password screen after
+// the chosen period of inactivity, discarding the decrypted identity from
+// RAM in the process. Picker mirrors the Theme preset list (buildThemeMenu)
+// — selecting a row applies it immediately and updates the ">" marker.
+void SettingsScreen::buildAutoLockMenu() {
+    _list.clear();
+    if (!_config) return;
+    uint16_t current = _config->settings().autoLockMinutes;
+
+    for (auto& o : kAutoLockOptions) {
+        char label[24];
+        snprintf(label, sizeof(label), "%s[%s]", (o.minutes == current) ? ">" : " ", o.label);
+        _list.addItem(label, (o.minutes == current) ? Theme::PRIMARY : 0);
     }
     _list.addItem("< Back");
 }
@@ -862,7 +905,8 @@ void SettingsScreen::render(M5Canvas& canvas) {
     // Header with accent bar
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
                              "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN", "THEME",
-                             "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME", "SECURITY"};
+                             "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME", "SECURITY",
+                             "AUTO-LOCK"};
     const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
@@ -1133,6 +1177,11 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             buildThemeMenu();
             return true;
         }
+        if (_subMenu == MENU_AUTOLOCK) {
+            _subMenu = MENU_SECURITY;
+            buildSecurityMenu();
+            return true;
+        }
         if (_subMenu != MENU_MAIN) {
             _subMenu = MENU_MAIN;
             buildMainMenu();
@@ -1214,6 +1263,9 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             } else if (_subMenu == MENU_THEME_CUSTOM) {
                 _subMenu = MENU_THEME;
                 buildThemeMenu();
+            } else if (_subMenu == MENU_AUTOLOCK) {
+                _subMenu = MENU_SECURITY;
+                buildSecurityMenu();
             } else {
                 _subMenu = MENU_MAIN;
                 buildMainMenu();
@@ -1304,6 +1356,7 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
         // configured yet, or asks to confirm disabling it if one already is.
         // "Reset Duress Password" (item 1) only exists when configured —
         // re-running setup just overwrites the existing verifier blob.
+        // Auto-Lock row sits right after those, wherever they land.
         if (_subMenu == MENU_SECURITY) {
             bool configured = Duress::isConfigured();
             if (sel == 0) {
@@ -1318,6 +1371,23 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             if (sel == 1 && configured) {
                 startDuressSetup();
                 return true;
+            }
+            int autoLockIdx = configured ? 2 : 1;
+            if (sel == autoLockIdx) {
+                _subMenu = MENU_AUTOLOCK;
+                buildAutoLockMenu();
+                return true;
+            }
+            return true;  // Back (last item) handled above
+        }
+
+        // Auto-Lock picker: selecting a preset applies it immediately and
+        // refreshes the marker, same interaction as the Theme preset list.
+        if (_subMenu == MENU_AUTOLOCK) {
+            if (sel >= 0 && sel < kAutoLockOptionCount && _config) {
+                _config->settings().autoLockMinutes = kAutoLockOptions[sel].minutes;
+                applyAndSave();
+                buildAutoLockMenu();
             }
             return true;  // Back (last item) handled above
         }
@@ -1490,6 +1560,7 @@ void SettingsScreen::applyAndSave() {
         _power->setDimTimeout(s.screenDimTimeout);
         _power->setOffTimeout(s.screenOffTimeout);
         _power->setBrightness(s.brightness);
+        _power->setAutoLockTimeout(s.autoLockMinutes);
     }
 
     // Apply audio settings

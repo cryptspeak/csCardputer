@@ -73,6 +73,14 @@ void UserConfig::sanitizeSettings() {
     _settings.manualUtcOffsetHours = constrain(_settings.manualUtcOffsetHours, -12, 14);
     _settings.autoIfaceMaxPeers = constrain(_settings.autoIfaceMaxPeers, 1, 16);
 
+    // Auto-lock is a fixed preset list (see SettingsScreen's kAutoLockOptions)
+    // — snap anything else (corrupted config, future-removed preset) to off
+    // rather than rebooting on some arbitrary leftover value.
+    switch (_settings.autoLockMinutes) {
+        case 0: case 30: case 60: case 240: case 480: case 720: break;
+        default: _settings.autoLockMinutes = 0; break;
+    }
+
     std::vector<TCPEndpoint> cleanTcp;
     cleanTcp.reserve(std::min((size_t)MAX_TCP_CONNECTIONS, _settings.tcpConnections.size()));
     for (auto& ep : _settings.tcpConnections) {
@@ -151,6 +159,8 @@ bool UserConfig::parseJson(const String& json) {
 
     _settings.displayName = doc["display_name"] | "";
 
+    _settings.autoLockMinutes = doc["auto_lock_min"] | 0;
+
     Serial.printf("[CONFIG] Loaded: wifi_mode=%d ssid='%s' name='%s'\n",
                   (int)_settings.wifiMode,
                   _settings.wifiSTASSID.c_str(),
@@ -203,6 +213,8 @@ String UserConfig::serializeToJson() {
     doc["autoiface_max"]   = _settings.autoIfaceMaxPeers;
 
     doc["display_name"] = _settings.displayName;
+
+    doc["auto_lock_min"] = _settings.autoLockMinutes;
 
     String json;
     serializeJson(doc, json);

@@ -56,6 +56,13 @@ struct UserSettings {
     bool manualTimezoneEnabled = false;
     int8_t manualUtcOffsetHours = 0;
 
+    // Security — auto-lock reboots the device back to the at-rest password
+    // screen after this many minutes of inactivity (0 = disabled). Unlike
+    // screenOffTimeout (which just blanks the display), this discards the
+    // already-decrypted identity from RAM, so the real password must be
+    // re-entered before the device functions again.
+    uint16_t autoLockMinutes = 0;
+
     // Setup
     bool radioConfigured = false; // false = show LoRa setup wizard at boot
 
