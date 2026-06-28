@@ -121,19 +121,15 @@ static const char* autoLockLabel(uint16_t minutes) {
     return "Disabled";
 }
 
-// Duress password: a second password that, entered at the unlock screen
-// instead of the real one, wipes the device instead of unlocking it. There
-// is no plaintext "enabled" flag — the row's label and this submenu both
-// derive the on/off state directly from whether a verifier blob exists in
-// NVS, so there's nothing to fall out of sync.
+// Security menu: each row is a status summary. Auto-Lock opens its own
+// picker page; Duress Password opens a small action popup instead (see
+// _duressMenuActive) — it only ever has 1-2 actions, not enough content to
+// earn a full page of its own.
 void SettingsScreen::buildSecurityMenu() {
     _list.clear();
     bool configured = Duress::isConfigured();
     _list.addItem(configured ? "Duress Password: Enabled"
                               : "Duress Password: Disabled");
-    if (configured) {
-        _list.addItem("Reset Duress Password");
-    }
     if (_config) {
         std::string label = "Auto-Lock: " + std::string(autoLockLabel(_config->settings().autoLockMinutes));
         _list.addItem(label);
@@ -162,7 +158,9 @@ void SettingsScreen::buildAutoLockMenu() {
 // _duressEntryActive block and the handleKey block guarding it) — drawn on
 // top of this screen rather than swapping to a different one, and
 // cancelable with Esc at any point, same as any other Settings field edit.
+// Closes the action popup first if that's what led here (Enable/Reset).
 void SettingsScreen::startDuressSetup() {
+    _duressMenuActive = false;
     _duressStage = 0;
     _duressFirstPw = "";
     _duressInput.clear();
@@ -964,6 +962,37 @@ void SettingsScreen::render(M5Canvas& canvas) {
         canvas.print(prompt);
     }
 
+    // Duress password action popup — small modal listing 1-2 selectable
+    // actions (Enable/Disable, Reset) instead of a full settings page.
+    // Picking Enable or Reset opens the masked entry popup below it.
+    if (_duressMenuActive) {
+        bool configured = Duress::isConfigured();
+        int rowCount = configured ? 2 : 1;
+        const char* toggleLabel = configured ? "Disable" : "Enable";
+
+        int bw = 140;
+        int bh = 22 + rowCount * 11;
+        int bx = (Theme::CONTENT_W - bw) / 2;
+        int by = Theme::CONTENT_Y + (Theme::CONTENT_H - bh) / 2;
+        canvas.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
+        canvas.drawRoundRect(bx, by, bw, bh, 3, Theme::PRIMARY);
+        canvas.setTextColor(Theme::PRIMARY);
+        canvas.setCursor(bx + 6, by + 5);
+        canvas.print("Duress Password");
+
+        int ry = by + 16;
+        for (int i = 0; i < rowCount; i++) {
+            bool sel = (_duressMenuSelected == i);
+            const char* label = (i == 0) ? toggleLabel : "Reset Password";
+            canvas.setTextColor(sel ? Theme::PRIMARY : Theme::TEXT_SECONDARY);
+            canvas.setCursor(bx + 8, ry);
+            canvas.print(sel ? "> [" : "  [");
+            canvas.print(label);
+            canvas.print("]");
+            ry += 11;
+        }
+    }
+
     // Duress password popup overlay — small modal, same family as the
     // confirm dialog above, with a masked input field in place of Y/N.
     if (_duressEntryActive) {
@@ -1105,6 +1134,41 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             showToast("Cancelled");
         }
         return true;
+    }
+
+    // Duress password action popup — Esc closes, ;/. move between the 1-2
+    // rows, Enter activates the selected one (see render() for the rows).
+    if (_duressMenuActive) {
+        bool configured = Duress::isConfigured();
+        int rowCount = configured ? 2 : 1;
+
+        if (event.character == 27) {
+            _duressMenuActive = false;
+            return true;
+        }
+        if (event.character == ';') {
+            _duressMenuSelected = (_duressMenuSelected + rowCount - 1) % rowCount;
+            return true;
+        }
+        if (event.character == '.') {
+            _duressMenuSelected = (_duressMenuSelected + 1) % rowCount;
+            return true;
+        }
+        if (event.enter) {
+            if (_duressMenuSelected == 0) {
+                _duressMenuActive = false;
+                if (configured) {
+                    _confirmPending = true;
+                    _confirmAction = 2;
+                } else {
+                    startDuressSetup();
+                }
+            } else if (_duressMenuSelected == 1 && configured) {
+                startDuressSetup();
+            }
+            return true;
+        }
+        return true;  // swallow anything else while the popup is active
     }
 
     // Duress password popup — small inline modal (see render()). Esc cancels
@@ -1352,28 +1416,16 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             return true;  // Back (last item) handled above
         }
 
-        // Security menu: item 0 starts setup if no duress password is
-        // configured yet, or asks to confirm disabling it if one already is.
-        // "Reset Duress Password" (item 1) only exists when configured —
-        // re-running setup just overwrites the existing verifier blob.
-        // Auto-Lock row sits right after those, wherever they land.
+        // Security menu: Duress Password opens the small action popup
+        // (handled up top via _duressMenuActive); Auto-Lock opens its own
+        // picker page.
         if (_subMenu == MENU_SECURITY) {
-            bool configured = Duress::isConfigured();
             if (sel == 0) {
-                if (configured) {
-                    _confirmPending = true;
-                    _confirmAction = 2;
-                } else {
-                    startDuressSetup();
-                }
+                _duressMenuActive = true;
+                _duressMenuSelected = 0;
                 return true;
             }
-            if (sel == 1 && configured) {
-                startDuressSetup();
-                return true;
-            }
-            int autoLockIdx = configured ? 2 : 1;
-            if (sel == autoLockIdx) {
+            if (sel == 1) {
                 _subMenu = MENU_AUTOLOCK;
                 buildAutoLockMenu();
                 return true;

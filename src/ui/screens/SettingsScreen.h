@@ -123,9 +123,14 @@ private:
     std::string _editLabel;
     BackCallback _backCb;
 
-    // Duress password setup — a small cancelable popup drawn on top of this
-    // screen (not a full-screen takeover). Two stages: enter, then confirm.
-    // See startDuressSetup() / onDuressInputSubmit().
+    // Duress password — small popups drawn on top of this screen (never a
+    // full-screen takeover). Selecting "Duress Password" in Security opens
+    // _duressMenuActive: a tiny Enable/Disable + Reset action popup. Picking
+    // Enable or Reset from there opens _duressEntryActive: the masked
+    // password entry popup (two stages: enter, then confirm).
+    bool _duressMenuActive = false;
+    int _duressMenuSelected = 0;   // row index within the action popup
+
     bool _duressEntryActive = false;
     int _duressStage = 0;          // 0 = enter password, 1 = confirm password
     String _duressFirstPw;
