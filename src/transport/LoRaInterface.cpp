@@ -62,6 +62,7 @@ void LoRaInterface::send_outgoing(const RNS::Bytes& data) {
             Serial.println("[LORA_IF] TX queue full, dropping oldest");
             _txQueue.pop_front();
             _txQueue.push_back(data);
+            _txQueueDropCount++;
         }
         return;
     }
@@ -76,6 +77,7 @@ void LoRaInterface::transmitNow(const RNS::Bytes& data) {
     if (needsSplit) {
         header |= RNODE_FLAG_SPLIT;
         size_t firstLen = RNODE_SINGLE_MTU;
+        _splitTxCount++;
 
         Serial.printf("[LORA_IF] TX SPLIT: %d bytes in 2 frames (seq=0x%02X)\n",
             (int)data.size(), header & RNODE_NIBBLE_SEQ);
@@ -103,6 +105,9 @@ void LoRaInterface::transmitNow(const RNS::Bytes& data) {
 
     _txPending = true;
     _txData = data;
+    _txPacketCount++;
+    _everTx = true;
+    _lastTxMs = millis();
     InterfaceImpl::handle_outgoing(data);
 
     // Track airtime
@@ -147,6 +152,7 @@ void LoRaInterface::loop() {
                 }
 
                 Serial.println("[LORA_IF] TX timed out after retry, dropping packet");
+                _txFailureCount++;
                 _txRetried = false;
                 _txData = RNS::Bytes();
 
@@ -224,8 +230,16 @@ void LoRaInterface::loop() {
 
     int packetSize = _radio->parsePacket();
     if (packetSize <= RNODE_HEADER_L) {
-        if (packetSize > 0) {
+        if (_radio->lastRxCrcFailed()) {
+            // Heard *something* — preamble + header detected — but the CRC
+            // didn't check out. Distinct from total silence: a high rate of
+            // these alongside low rxPacketCount means weak/distant senders
+            // are reaching the radio but not cleanly, not that nothing is
+            // arriving at all. See RadioDiagnosticsScreen's Counters page.
+            _rxCrcFailCount++;
+        } else if (packetSize > 0) {
             Serial.printf("[LORA_IF] RX runt packet (%d bytes), discarding\n", packetSize);
+            _rxDroppedCount++;
         }
         _radio->receive();
         return;
@@ -264,6 +278,10 @@ void LoRaInterface::loop() {
 
             Serial.printf("[LORA_IF] RX SPLIT reassembled: %d bytes total\n", totalSize);
 
+            _splitRxCount++;
+            _rxPacketCount++;
+            _everRx = true;
+            _lastRxMs = millis();
             InterfaceImpl::handle_incoming(_splitRxBuffer);
             _splitRxBuffer = RNS::Bytes();
 
@@ -296,6 +314,9 @@ void LoRaInterface::loop() {
 
     RNS::Bytes buf(payloadSize);
     memcpy(buf.writable(payloadSize), raw + RNODE_HEADER_L, payloadSize);
+    _rxPacketCount++;
+    _everRx = true;
+    _lastRxMs = millis();
     InterfaceImpl::handle_incoming(buf);
 
     if (!_txPending) {

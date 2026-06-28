@@ -36,6 +36,7 @@
 #include "ui/screens/DataCleanScreen.h"
 #include "ui/screens/HelpOverlay.h"
 #include "ui/screens/RadioSetupScreen.h"
+#include "ui/screens/RadioDiagnosticsScreen.h"
 #include "ui/screens/PasswordScreen.h"
 #include "reticulum/IdentityCrypto.h"
 #include "security/Duress.h"
@@ -103,6 +104,7 @@ NameInputScreen nameInputScreen;
 DataCleanScreen dataCleanScreen;
 SettingsScreen settingsScreen;
 RadioSetupScreen radioSetupScreen;
+RadioDiagnosticsScreen radioDiagnosticsScreen;
 HelpOverlay helpOverlay;
 PasswordScreen passwordScreen;
 MigrationWarningScreen migrationScreen;
@@ -1380,9 +1382,22 @@ void setup() {
 #if HAS_GPS
     settingsScreen.setGPS(&gps);
 #endif
+    settingsScreen.setOpenDiagnosticsCallback([]() {
+        ui.setScreen(&radioDiagnosticsScreen);
+    });
 
     radioSetupScreen.setUserConfig(&userConfig);
     radioSetupScreen.setRadio(&radio);
+
+    radioDiagnosticsScreen.setRadio(&radio);
+    radioDiagnosticsScreen.setRNS(&rns);
+    radioDiagnosticsScreen.setLXMF(&lxmf);
+    radioDiagnosticsScreen.setAnnounceManager(announceManager);
+    radioDiagnosticsScreen.setUIManager(&ui);
+    radioDiagnosticsScreen.setPower(&power);
+    radioDiagnosticsScreen.setBackCallback([]() {
+        ui.setScreen(&settingsScreen);
+    });
 
     tabScreens[TabBar::TAB_HOME]  = &homeScreen;
     tabScreens[TabBar::TAB_MSGS]  = &messagesScreen;
@@ -1763,6 +1778,7 @@ void loop() {
                           autoIface.isOnline() ? "ON" : "off",
                           (unsigned)autoIface.peerCount(),
                           millis() / 1000);
+            radioDiagnosticsScreen.setSystemStats(maxLoopTime, ESP.getMinFreeHeap());
             maxLoopTime = 0;
         }
     }

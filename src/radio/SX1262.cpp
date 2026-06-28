@@ -582,6 +582,8 @@ void SX1262::receive(int size) {
 }
 
 int SX1262::parsePacket(int size) {
+    _lastRxCrcFailed = false;
+
     uint8_t buf[2] = {0};
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
 
@@ -619,6 +621,7 @@ int SX1262::parsePacket(int size) {
     readBuffer(_packet, packetLength);
 
     if (!crcOk) {
+        _lastRxCrcFailed = true;
         Serial.printf("[SX1262] RX CRC FAIL: %d bytes RSSI=%.0f SNR=%.1f IRQ=0x%02X%02X\n",
                       packetLength, rssi, snr, buf[0], buf[1]);
         Serial.printf("[SX1262] RX DATA[0..15]: ");

@@ -50,14 +50,21 @@ public:
     using BackCallback = std::function<void()>;
     void setBackCallback(BackCallback cb) { _backCb = cb; }
 
+    // Radio > Diagnostics opens a full pushed screen (RadioDiagnosticsScreen)
+    // rather than a submenu page here — same family as MessagesScreen's
+    // setOpenCallback for MessageView.
+    using OpenDiagnosticsCallback = std::function<void()>;
+    void setOpenDiagnosticsCallback(OpenDiagnosticsCallback cb) { _openDiagnosticsCb = cb; }
+
 private:
     enum SubMenu { MENU_MAIN, MENU_RADIO, MENU_WIFI, MENU_TCP, MENU_SDCARD,
                    MENU_DISPLAY, MENU_AUDIO, MENU_ABOUT, MENU_WIFI_SCAN, MENU_THEME,
                    MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER, MENU_TIME,
-                   MENU_SECURITY, MENU_AUTOLOCK };
+                   MENU_SECURITY, MENU_AUTOLOCK, MENU_RADIO_CONFIG };
 
     void buildMainMenu();
     void buildRadioMenu();
+    void buildRadioConfigMenu();
     void buildWiFiMenu();
     void buildTCPMenu();
     void buildSDCardMenu();
@@ -122,6 +129,7 @@ private:
     std::string _tcpPendingHost;
     std::string _editLabel;
     BackCallback _backCb;
+    OpenDiagnosticsCallback _openDiagnosticsCb;
 
     // Duress password — small popups drawn on top of this screen (never a
     // full-screen takeover). Selecting "Duress Password" in Security opens

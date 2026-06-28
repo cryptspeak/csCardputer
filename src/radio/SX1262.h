@@ -63,6 +63,11 @@ public:
     int  packetRssi();
     float packetSnr();
     bool isRadioOnline() { return _radioOnline; }
+    // Valid only in the call immediately after parsePacket() returns 0: true
+    // if that 0 meant "RX_DONE fired but CRC failed" rather than "nothing
+    // new". Lets callers tell a corrupted-but-heard packet (weak signal/
+    // marginal link) apart from genuine silence.
+    bool lastRxCrcFailed() const { return _lastRxCrcFailed; }
     long getPreambleLength() const { return _preambleLength; }
     uint8_t readRegister(uint16_t address);
     uint16_t getDeviceErrors();
@@ -146,6 +151,7 @@ private:
 
     bool _txActive = false;
     bool _lastTxFailed = false;
+    bool _lastRxCrcFailed = false;
     uint32_t _txStartMs = 0;
     uint32_t _txTimeoutMs = 0;
 

@@ -230,6 +230,14 @@ void SettingsScreen::onDuressInputSubmit(const std::string& value) {
 void SettingsScreen::buildRadioMenu() {
     _list.clear();
     if (!_config) return;
+    _list.addItem("Config");
+    _list.addItem("Diagnostics");
+    _list.addItem("< Back");
+}
+
+void SettingsScreen::buildRadioConfigMenu() {
+    _list.clear();
+    if (!_config) return;
     auto& s = _config->settings();
     char buf[40];
 
@@ -706,7 +714,7 @@ void SettingsScreen::commitEdit(const std::string& value) {
     if (!_config) return;
     auto& s = _config->settings();
 
-    if (_subMenu == MENU_RADIO) {
+    if (_subMenu == MENU_RADIO_CONFIG) {
         long v = atol(value.c_str());
         switch (_editField) {
             case 0:  // Frequency: 150MHz-960MHz
@@ -726,7 +734,7 @@ void SettingsScreen::commitEdit(const std::string& value) {
                 break;
         }
         applyAndSave();
-        buildRadioMenu();
+        buildRadioConfigMenu();
     } else if (_subMenu == MENU_TCP) {
         if (_editField == 99 && !value.empty()) {
             // Host submitted — stash and open port input
@@ -856,7 +864,7 @@ std::string SettingsScreen::getCurrentValue(SubMenu menu, int field) {
     auto& s = _config->settings();
     char buf[32];
 
-    if (menu == MENU_RADIO) {
+    if (menu == MENU_RADIO_CONFIG) {
         switch (field) {
             case 0: snprintf(buf, sizeof(buf), "%lu", (unsigned long)s.loraFrequency); return buf;
             case 1: snprintf(buf, sizeof(buf), "%d", s.loraSF); return buf;
@@ -904,7 +912,7 @@ void SettingsScreen::render(M5Canvas& canvas) {
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
                              "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN", "THEME",
                              "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME", "SECURITY",
-                             "AUTO-LOCK"};
+                             "AUTO-LOCK", "RADIO CONFIG"};
     const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
@@ -1293,6 +1301,11 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             buildThemeMenu();
             return true;
         }
+        if (_subMenu == MENU_RADIO_CONFIG) {
+            _subMenu = MENU_RADIO;
+            buildRadioMenu();
+            return true;
+        }
         if (_subMenu == MENU_AUTOLOCK) {
             _subMenu = MENU_SECURITY;
             buildSecurityMenu();
@@ -1379,12 +1392,28 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             } else if (_subMenu == MENU_THEME_CUSTOM) {
                 _subMenu = MENU_THEME;
                 buildThemeMenu();
+            } else if (_subMenu == MENU_RADIO_CONFIG) {
+                _subMenu = MENU_RADIO;
+                buildRadioMenu();
             } else if (_subMenu == MENU_AUTOLOCK) {
                 _subMenu = MENU_SECURITY;
                 buildSecurityMenu();
             } else {
                 _subMenu = MENU_MAIN;
                 buildMainMenu();
+            }
+            return true;
+        }
+
+        // Radio menu: "Config" opens the editable PHY settings page (the
+        // values that used to sit directly in this menu); "Diagnostics"
+        // opens a full pushed screen instead (see setOpenDiagnosticsCallback).
+        if (_subMenu == MENU_RADIO) {
+            if (sel == 0) {
+                _subMenu = MENU_RADIO_CONFIG;
+                buildRadioConfigMenu();
+            } else if (sel == 1) {
+                if (_openDiagnosticsCb) _openDiagnosticsCb();
             }
             return true;
         }
