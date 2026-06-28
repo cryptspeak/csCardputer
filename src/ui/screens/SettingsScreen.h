@@ -136,6 +136,12 @@ private:
     String _duressFirstPw;
     TextInput _duressInput;
 
+    // WiFi mode popup — same family as the Duress action popup: a fixed,
+    // small set of options (OFF/AP/STA) shown as marked rows instead of a
+    // blind cycle-on-Enter with no visible alternatives.
+    bool _wifiModeMenuActive = false;
+    int _wifiModeMenuSelected = 0;
+
     // WiFi scan state
     struct WiFiNetwork { String ssid; int32_t rssi; uint8_t encType; };
     std::vector<WiFiNetwork> _scanResults;

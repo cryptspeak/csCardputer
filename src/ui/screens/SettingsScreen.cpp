@@ -1013,6 +1013,31 @@ void SettingsScreen::render(M5Canvas& canvas) {
         canvas.print(hint);
     }
 
+    // WiFi mode popup — same family as the Duress action popup above.
+    if (_wifiModeMenuActive) {
+        static const char* kWifiModeLabels[3] = {"OFF", "AP", "STA"};
+        int bw = 110;
+        int bh = 22 + 3 * 11;
+        int bx = (Theme::CONTENT_W - bw) / 2;
+        int by = Theme::CONTENT_Y + (Theme::CONTENT_H - bh) / 2;
+        canvas.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
+        canvas.drawRoundRect(bx, by, bw, bh, 3, Theme::PRIMARY);
+        canvas.setTextColor(Theme::PRIMARY);
+        canvas.setCursor(bx + 6, by + 5);
+        canvas.print("WiFi Mode");
+
+        int ry = by + 16;
+        for (int i = 0; i < 3; i++) {
+            bool sel = (_wifiModeMenuSelected == i);
+            canvas.setTextColor(sel ? Theme::PRIMARY : Theme::TEXT_SECONDARY);
+            canvas.setCursor(bx + 8, ry);
+            canvas.print(sel ? "> [" : "  [");
+            canvas.print(kWifiModeLabels[i]);
+            canvas.print("]");
+            ry += 11;
+        }
+    }
+
     // Toast overlay (drawn on top of everything)
     if (_toastMessage && millis() < _toastUntil) {
         int tw = strlen(_toastMessage) * Theme::CHAR_W + 12;
@@ -1166,6 +1191,33 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             } else if (_duressMenuSelected == 1 && configured) {
                 startDuressSetup();
             }
+            return true;
+        }
+        return true;  // swallow anything else while the popup is active
+    }
+
+    // WiFi mode popup — Esc closes, ;/. move between OFF/AP/STA, Enter
+    // applies the selected mode (see render() for the rows).
+    if (_wifiModeMenuActive) {
+        if (event.character == 27) {
+            _wifiModeMenuActive = false;
+            return true;
+        }
+        if (event.character == ';') {
+            _wifiModeMenuSelected = (_wifiModeMenuSelected + 2) % 3;
+            return true;
+        }
+        if (event.character == '.') {
+            _wifiModeMenuSelected = (_wifiModeMenuSelected + 1) % 3;
+            return true;
+        }
+        if (event.enter) {
+            _wifiModeMenuActive = false;
+            auto& s = _config->settings();
+            s.wifiMode = (RatWiFiMode)_wifiModeMenuSelected;
+            applyAndSave();
+            showToast("Reboot to apply");
+            buildWiFiMenu();
             return true;
         }
         return true;  // swallow anything else while the popup is active
@@ -1444,13 +1496,11 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             return true;  // Back (last item) handled above
         }
 
-        // Cycle WiFi mode (item 0 in WiFi menu)
+        // WiFi mode (item 0 in WiFi menu) — opens the mode popup instead of
+        // blindly cycling on every Enter press.
         if (_subMenu == MENU_WIFI && sel == 0) {
-            auto& s = _config->settings();
-            s.wifiMode = (RatWiFiMode)(((int)s.wifiMode + 1) % 3);
-            applyAndSave();
-            showToast("Reboot to apply");
-            buildWiFiMenu();
+            _wifiModeMenuActive = true;
+            _wifiModeMenuSelected = (int)_config->settings().wifiMode;
             return true;
         }
 
