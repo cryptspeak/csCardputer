@@ -14,6 +14,23 @@ This protects against an attacker who **physically obtains the device**
 - Device settings — WiFi passwords, TCP hub addresses, radio config,
   display name (as of this change).
 
+## Coercion: the optional duress password
+
+Everything above assumes an attacker who only has the *device*, not the
+*user*. That doesn't hold for a border search, a robbery, or an abuse
+situation, where someone can simply force the real password out of the
+user. For that case there's an opt-in duress password (off by default):
+entered at the unlock screen instead of the real one, it wipes the device
+instead of unlocking it, then reboots into the same first-boot setup
+screen a brand-new device shows — no special "wiped" state visible to
+whoever is watching. See [duress-password.md](duress-password.md) for the
+full mechanism, including why a plain reboot was chosen over a more
+elaborate cover story: against an adversary who has actually read this
+firmware's source, neither option hides that a wipe happened, so the
+extra complexity bought nothing against that adversary while a plain
+reboot was still the most mundane outcome against the realistic one
+(someone coercing the password in the moment, not auditing the codebase).
+
 ## Explicitly out of scope
 
 - **The device while unlocked and running.** Once the password has been

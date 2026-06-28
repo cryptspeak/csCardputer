@@ -38,6 +38,8 @@
 #include "ui/screens/RadioSetupScreen.h"
 #include "ui/screens/PasswordScreen.h"
 #include "reticulum/IdentityCrypto.h"
+#include "security/Duress.h"
+#include "storage/FactoryWipe.h"
 #include "power/PowerManager.h"
 #include "audio/AudioNotify.h"
 #include "transport/BLEStub.h"
@@ -851,6 +853,21 @@ static PasswordGateResult runPasswordGate(ReticulumManager::IdentityState state)
                 res.unlockedKey = plain;
                 IdentityCrypto::secureZero((void*)submitted.c_str(), submitted.length());
                 return res;
+            }
+
+            // Duress check — a separate password that wipes the device
+            // instead of unlocking it. Checked only after the real password
+            // fails, so a correct real password always wins on the (should
+            // never happen) chance the two were ever made to collide. On
+            // match this never returns: wipe, then reboot straight into the
+            // normal fresh-device setup flow with no special-case screen —
+            // to anyone watching, the device just reset itself.
+            if (Duress::isConfigured() && Duress::check(submitted)) {
+                IdentityCrypto::secureZero((void*)submitted.c_str(), submitted.length());
+                Serial.println("[BOOT] Duress password entered — wiping all data");
+                FactoryWipe::wipeAll(&flash, &sdStore);
+                delay(300);
+                ESP.restart();
             }
 
             attempts++;

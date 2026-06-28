@@ -138,3 +138,6 @@ than introduce a second authenticated-encryption construction.
   [encryption-contacts-settings.md](encryption-contacts-settings.md) has
   the call-site-level detail.
 - Want the adversarial framing? [threat-model.md](threat-model.md).
+- Curious about the optional duress password? It reuses `IdentityCrypto`'s
+  wrap/unwrap envelope for an unrelated purpose (a verifier, not a key) —
+  see [duress-password.md](duress-password.md).

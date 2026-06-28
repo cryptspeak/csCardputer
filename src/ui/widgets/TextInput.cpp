@@ -78,10 +78,16 @@ void TextInput::render(M5Canvas& canvas, int x, int y, int w) {
         int start = _cursorPos - maxChars + 1;
         if (start < 0) start = 0;
         canvas.setCursor(textX, y + 2);
-        canvas.print(_text.substr(start, maxChars).c_str());
+        std::string shown = _text.substr(start, maxChars);
+        if (_masked) shown.assign(shown.length(), '*');
+        canvas.print(shown.c_str());
     } else {
         canvas.setCursor(textX, y + 2);
-        canvas.print(_text.c_str());
+        if (_masked) {
+            canvas.print(std::string(_text.length(), '*').c_str());
+        } else {
+            canvas.print(_text.c_str());
+        }
     }
 
     // Cursor blink

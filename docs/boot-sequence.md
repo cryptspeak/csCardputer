@@ -25,6 +25,10 @@ numbers will drift as the file changes; look for the named calls instead.
      SETUP   path: type + confirm a new password (≥6 chars)
      UNLOCK  path: type once, up to 10 attempts, IdentityCrypto::unwrap()
                    verifies the MAC before any decryption is attempted
+                   → on each failed attempt, also checked against the
+                     optional duress password (if configured); a match
+                     wipes the device and reboots instead of counting as
+                     a failed attempt (see "Duress password" below)
      → returns { password, unlockedKey }
 
 8. rns.setPassword(password)
@@ -91,3 +95,11 @@ adopted the identity. From that point on, only the *identity's private
 key* lives in RAM (which Reticulum itself requires for normal operation —
 that's not something this firmware can avoid), not the password that
 unlocked it.
+
+## Duress password
+
+Step 7's UNLOCK path checks each failed attempt against an optional
+second password before counting it as wrong. A match wipes the device and
+reboots — see [duress-password.md](duress-password.md) for the full
+mechanism (verifier storage, wipe scope, and why the reboot intentionally
+looks identical to a fresh device rather than showing any "wiped" state).

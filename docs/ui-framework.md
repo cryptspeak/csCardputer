@@ -135,5 +135,5 @@ Each file under [`src/ui/screens/`](../src/ui/screens/) is one
 | `MessagesScreen` | Conversation list, unread badges, add/remove contact |
 | `MessageView` | Single conversation thread + composer |
 | `NodesScreen` | Discovered/saved peers (backed by `AnnounceManager`, see [announce-discovery.md](announce-discovery.md)) |
-| `SettingsScreen` | Nested settings menus — Radio, WiFi, TCP, SD, Display, Audio, Time, Theme, About |
+| `SettingsScreen` | Nested settings menus — Radio, WiFi, TCP, SD, Display, Audio, Time, Security, Theme, About (see [duress-password.md](duress-password.md) for the Security submenu) |
 | `HelpOverlay` | Hotkey reference, rendered as an overlay over whatever screen is active |

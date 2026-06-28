@@ -16,6 +16,7 @@
 #include "reticulum/ReticulumManager.h"
 #include "input/Keyboard.h"
 #include "config/Config.h"
+#include "ui/screens/PasswordScreen.h"
 #if HAS_GPS
 #include "hal/GPSManager.h"
 #endif
@@ -52,7 +53,8 @@ public:
 private:
     enum SubMenu { MENU_MAIN, MENU_RADIO, MENU_WIFI, MENU_TCP, MENU_SDCARD,
                    MENU_DISPLAY, MENU_AUDIO, MENU_ABOUT, MENU_WIFI_SCAN, MENU_THEME,
-                   MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER, MENU_TIME };
+                   MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER, MENU_TIME,
+                   MENU_SECURITY };
 
     void buildMainMenu();
     void buildRadioMenu();
@@ -64,6 +66,10 @@ private:
     void buildDisplayScreenMenu();
     void buildAudioMenu();
     void buildTimeMenu();
+    void buildSecurityMenu();
+    void startDuressSetup();
+    void cancelDuressSetup();
+    void onDuressInputSubmit(const std::string& value);
     void buildThemeMenu();
     void buildThemeCustomMenu();
     void applyThemePreset(int index);
@@ -116,6 +122,14 @@ private:
     std::string _editLabel;
     BackCallback _backCb;
 
+    // Duress password setup — a small cancelable popup drawn on top of this
+    // screen (not a full-screen takeover). Two stages: enter, then confirm.
+    // See startDuressSetup() / onDuressInputSubmit().
+    bool _duressEntryActive = false;
+    int _duressStage = 0;          // 0 = enter password, 1 = confirm password
+    String _duressFirstPw;
+    TextInput _duressInput;
+
     // WiFi scan state
     struct WiFiNetwork { String ssid; int32_t rssi; uint8_t encType; };
     std::vector<WiFiNetwork> _scanResults;
@@ -126,7 +140,7 @@ private:
 
     // Confirmation dialog state
     bool _confirmPending = false;
-    int _confirmAction = 0;  // 0=factory reset, 1=SD wipe
+    int _confirmAction = 0;  // 0=factory reset, 1=SD wipe, 2=disable duress password
 
     // Theme > Custom: optional RGB mixer (alternative to typing hex directly)
     bool _useMixer = false;        // toggled in buildThemeCustomMenu(); session-only

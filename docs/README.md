@@ -13,6 +13,7 @@ most likely to need careful review.
 | [encryption-messages.md](encryption-messages.md) | At-rest encryption of LXMF message files, the `MessageEncryption` module |
 | [encryption-contacts-settings.md](encryption-contacts-settings.md) | At-rest encryption of contacts, the name cache, and device settings — `ContactsEncryption` / `SettingsEncryption` |
 | [boot-sequence.md](boot-sequence.md) | The full boot flow: identity probe, password gate, legacy migration, encryption wiring order |
+| [duress-password.md](duress-password.md) | The optional second password that wipes the device instead of unlocking it — `Duress` / `FactoryWipe` modules, Settings UI |
 | [threat-model.md](threat-model.md) | What this defends against, what it explicitly does not, and why |
 
 ## Firmware

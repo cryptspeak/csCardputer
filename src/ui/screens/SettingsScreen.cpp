@@ -1,9 +1,11 @@
 #include "SettingsScreen.h"
 #include "ui/Theme.h"
 #include "config/Config.h"
+#include "security/Duress.h"
+#include "storage/FactoryWipe.h"
+#include "reticulum/IdentityCrypto.h"
 #include <algorithm>
 #include <cctype>
-#include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
 
@@ -78,6 +80,7 @@ void SettingsScreen::buildMainMenu() {
     _list.addItem("Display");
     _list.addItem("Audio");
     _list.addItem("Time");
+    _list.addItem("Security");
     _list.addItem("About");
     _list.addItem("Factory Reset", Theme::ERROR);
 }
@@ -94,6 +97,93 @@ void SettingsScreen::buildTimeMenu() {
         _list.addItem(buf);
     }
     _list.addItem("< Back");
+}
+
+// Duress password: a second password that, entered at the unlock screen
+// instead of the real one, wipes the device instead of unlocking it. There
+// is no plaintext "enabled" flag — the row's label and this submenu both
+// derive the on/off state directly from whether a verifier blob exists in
+// NVS, so there's nothing to fall out of sync.
+void SettingsScreen::buildSecurityMenu() {
+    _list.clear();
+    bool configured = Duress::isConfigured();
+    _list.addItem(configured ? "Duress Password: Enabled"
+                              : "Duress Password: Disabled");
+    if (configured) {
+        _list.addItem("Reset Duress Password");
+    }
+    _list.addItem("< Back");
+}
+
+// Opens the small inline duress-password popup (see render()'s
+// _duressEntryActive block and the handleKey block guarding it) — drawn on
+// top of this screen rather than swapping to a different one, and
+// cancelable with Esc at any point, same as any other Settings field edit.
+void SettingsScreen::startDuressSetup() {
+    _duressStage = 0;
+    _duressFirstPw = "";
+    _duressInput.clear();
+    _duressInput.setMaxLength(PasswordScreen::MAX_LEN);
+    _duressInput.setMasked(true);
+    _duressInput.setActive(true);
+    _duressInput.setSubmitCallback([this](const std::string& v) { onDuressInputSubmit(v); });
+    _duressEntryActive = true;
+}
+
+void SettingsScreen::cancelDuressSetup() {
+    _duressEntryActive = false;
+    _duressInput.setActive(false);
+    _duressInput.clear();
+    IdentityCrypto::secureZero((void*)_duressFirstPw.c_str(), _duressFirstPw.length());
+    _duressFirstPw = "";
+    showToast("Cancelled");
+}
+
+// Stage 0: validate length + difference from the real at-rest password,
+// then advance to confirm. Stage 1: must match stage 0's entry, then
+// persist via Duress::setup(). Mirrors the validation PasswordScreen does
+// for the boot-time setup flow, just driven locally instead of through a
+// pushed screen.
+void SettingsScreen::onDuressInputSubmit(const std::string& value) {
+    String pw = value.c_str();
+
+    if (_duressStage == 0) {
+        if ((int)pw.length() < PasswordScreen::MIN_LEN) {
+            showToast("Min 6 characters");
+            _duressInput.clear();
+            return;
+        }
+        if (_rns && _rns->isCurrentPassword(pw)) {
+            showToast("Must differ from main password");
+            _duressInput.clear();
+            return;
+        }
+        _duressFirstPw = pw;
+        _duressStage = 1;
+        _duressInput.clear();
+        return;
+    }
+
+    // Stage 1: confirm.
+    if (pw != _duressFirstPw) {
+        showToast("Passwords do not match");
+        IdentityCrypto::secureZero((void*)_duressFirstPw.c_str(), _duressFirstPw.length());
+        _duressFirstPw = "";
+        _duressStage = 0;
+        _duressInput.clear();
+        return;
+    }
+
+    bool ok = Duress::setup(pw);
+    IdentityCrypto::secureZero((void*)pw.c_str(), pw.length());
+    IdentityCrypto::secureZero((void*)_duressFirstPw.c_str(), _duressFirstPw.length());
+    _duressFirstPw = "";
+
+    _duressEntryActive = false;
+    _duressInput.setActive(false);
+    _duressInput.clear();
+    buildSecurityMenu();
+    showToast(ok ? "Duress password set" : "Failed to set");
 }
 
 void SettingsScreen::buildRadioMenu() {
@@ -772,7 +862,7 @@ void SettingsScreen::render(M5Canvas& canvas) {
     // Header with accent bar
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
                              "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN", "THEME",
-                             "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME"};
+                             "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME", "SECURITY"};
     const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
@@ -816,8 +906,9 @@ void SettingsScreen::render(M5Canvas& canvas) {
 
     // Confirmation dialog overlay
     if (_confirmPending) {
-        const char* prompt = _confirmAction == 0 ?
-            "Factory Reset? Y/N" : "Wipe SD Data? Y/N";
+        const char* prompt = _confirmAction == 0 ? "Factory Reset? Y/N" :
+                             _confirmAction == 1 ? "Wipe SD Data? Y/N" :
+                                                    "Disable Duress PW? Y/N";
         int tw = strlen(prompt) * Theme::CHAR_W + 16;
         int th = Theme::CHAR_H + 10;
         int tx = (Theme::CONTENT_W - tw) / 2;
@@ -827,6 +918,26 @@ void SettingsScreen::render(M5Canvas& canvas) {
         canvas.setTextColor(Theme::ERROR);
         canvas.setCursor(tx + 8, ty + 5);
         canvas.print(prompt);
+    }
+
+    // Duress password popup overlay — small modal, same family as the
+    // confirm dialog above, with a masked input field in place of Y/N.
+    if (_duressEntryActive) {
+        const char* title = _duressStage == 0 ? "Duress Password" : "Confirm Password";
+        const char* hint  = "Enter=next  Esc=cancel";
+        int bw = 150;
+        int bh = 48;
+        int bx = (Theme::CONTENT_W - bw) / 2;
+        int by = Theme::CONTENT_Y + (Theme::CONTENT_H - bh) / 2;
+        canvas.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
+        canvas.drawRoundRect(bx, by, bw, bh, 3, Theme::PRIMARY);
+        canvas.setTextColor(Theme::PRIMARY);
+        canvas.setCursor(bx + 6, by + 5);
+        canvas.print(title);
+        _duressInput.render(canvas, bx + 6, by + 16, bw - 12);
+        canvas.setTextColor(Theme::MUTED);
+        canvas.setCursor(bx + 6, by + 37);
+        canvas.print(hint);
     }
 
     // Toast overlay (drawn on top of everything)
@@ -931,7 +1042,7 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             _confirmPending = false;
             if (_confirmAction == 0) {
                 factoryReset();
-            } else {
+            } else if (_confirmAction == 1) {
                 if (_sdStore && _sdStore->isReady()) {
                     if (_sdStore->wipeStandalone()) {
                         showToast("SD wiped!");
@@ -940,11 +1051,27 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                     }
                     buildSDCardMenu();
                 }
+            } else if (_confirmAction == 2) {
+                Duress::disable();
+                buildSecurityMenu();
+                showToast("Duress password disabled");
             }
         } else {
             _confirmPending = false;
             showToast("Cancelled");
         }
+        return true;
+    }
+
+    // Duress password popup — small inline modal (see render()). Esc cancels
+    // at any point and discards anything typed so far; everything else goes
+    // to the masked text field.
+    if (_duressEntryActive) {
+        if (event.character == 27) {
+            cancelDuressSetup();
+            return true;
+        }
+        _duressInput.handleKey(event);
         return true;
     }
 
@@ -1051,8 +1178,9 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                 case 3: _subMenu = MENU_DISPLAY; buildDisplayMenu(); break;
                 case 4: _subMenu = MENU_AUDIO; buildAudioMenu(); break;
                 case 5: _subMenu = MENU_TIME; buildTimeMenu(); break;
-                case 6: _subMenu = MENU_ABOUT; break;
-                case 7: _confirmPending = true; _confirmAction = 0; break;
+                case 6: _subMenu = MENU_SECURITY; buildSecurityMenu(); break;
+                case 7: _subMenu = MENU_ABOUT; break;
+                case 8: _confirmPending = true; _confirmAction = 0; break;
             }
             return true;
         }
@@ -1167,6 +1295,28 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                 char buf[8];
                 snprintf(buf, sizeof(buf), "%d", s.manualUtcOffsetHours);
                 startEditing(1, buf, "UTC Offset (-12 to 14):");
+                return true;
+            }
+            return true;  // Back (last item) handled above
+        }
+
+        // Security menu: item 0 starts setup if no duress password is
+        // configured yet, or asks to confirm disabling it if one already is.
+        // "Reset Duress Password" (item 1) only exists when configured —
+        // re-running setup just overwrites the existing verifier blob.
+        if (_subMenu == MENU_SECURITY) {
+            bool configured = Duress::isConfigured();
+            if (sel == 0) {
+                if (configured) {
+                    _confirmPending = true;
+                    _confirmAction = 2;
+                } else {
+                    startDuressSetup();
+                }
+                return true;
+            }
+            if (sel == 1 && configured) {
+                startDuressSetup();
                 return true;
             }
             return true;  // Back (last item) handled above
@@ -1362,28 +1512,7 @@ void SettingsScreen::applyAndSave() {
 
 void SettingsScreen::factoryReset() {
     Serial.println("[SETTINGS] Factory reset — wiping ALL data");
-
-    // 1. Clear ALL NVS namespaces (config, identity, boot counter)
-    {
-        Preferences prefs;
-        if (prefs.begin("ratcom", false)) { prefs.clear(); prefs.end(); }
-        if (prefs.begin("ratcom_cfg", false)) { prefs.clear(); prefs.end(); }
-        if (prefs.begin("ratcom_id", false)) { prefs.clear(); prefs.end(); }
-        Serial.println("[RESET] NVS cleared");
-    }
-
-    // 2. Wipe legacy /ratcom SD card directory
-    if (_sdStore && _sdStore->isReady()) {
-        _sdStore->wipeStandalone();
-        Serial.println("[RESET] SD wiped");
-    }
-
-    // 3. Format LittleFS (destroys all flash files)
-    if (_flash) {
-        _flash->format();
-        Serial.println("[RESET] Flash formatted");
-    }
-
+    FactoryWipe::wipeAll(_flash, _sdStore);
     Serial.println("[RESET] Factory reset complete — rebooting");
     delay(500);
     ESP.restart();

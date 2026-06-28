@@ -22,6 +22,9 @@ public:
     void setActive(bool active) { _active = active; }
     void setMaxLength(int len) { _maxLength = len; }
     void setNumericOnly(bool numeric) { _numericOnly = numeric; }
+    // Renders every character as '*' instead of the actual text — for
+    // password-style fields.
+    void setMasked(bool masked) { _masked = masked; }
 
     // Callback when Enter is pressed
     using SubmitCallback = std::function<void(const std::string&)>;
@@ -35,5 +38,6 @@ private:
     unsigned long _lastBlink = 0;
     int _maxLength = 200;
     bool _numericOnly = false;
+    bool _masked = false;
     SubmitCallback _submitCb;
 };

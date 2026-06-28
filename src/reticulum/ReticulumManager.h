@@ -63,6 +63,12 @@ public:
     // operations will fail until setPassword() is called again.
     void clearPassword();
 
+    // True if `candidate` equals the currently cached at-rest password.
+    // Used by Settings to reject a duress password that matches the real
+    // one (which would make the two indistinguishable). Always false if
+    // no password is currently cached.
+    bool isCurrentPassword(const String& candidate) const { return _password.length() > 0 && _password == candidate; }
+
     // Look at all storage tiers without modifying anything; classify the
     // identity-at-rest state. Cheap — only reads file headers.
     IdentityState probeIdentityState();
