@@ -1,5 +1,10 @@
 # Propagation Nodes (Offline Messaging)
 
+> **Known issue:** PN sync/handoff appears to be in a broken state on
+> hardware right now, likely a side effect of the routing/interface-
+> stickiness and LoRa listen-before-talk changes landed alongside it.
+> Not yet root-caused — needs a dedicated look.
+
 Module: [`src/reticulum/PropagationClient.{h,cpp}`](../src/reticulum/PropagationClient.h),
 integration in [`src/reticulum/LXMFManager.cpp`](../src/reticulum/LXMFManager.cpp)
 (`tryPropagationFallback()`, `syncPropagationNode()`,
