@@ -83,6 +83,12 @@ private:
     void enforceFlashCache(const std::string& peerHex);
     void migrateFlashToSD();
     void migrateOldFilenames();
+    // The directory itself is named with peerHex truncated to 16 hex chars
+    // (see conversationDir()) -- not enough bytes to address a packet to.
+    // Every message file inside still carries the full src/dst hex, so peek
+    // at one to recover it instead of handing the lossy directory name out
+    // to callers that need a real destination hash (e.g. to send a reply).
+    std::string resolveConversationPeerHex(const String& dirPath, bool useSD) const;
     void initReceiveCounter();
     void countTotalMessages();
     uint32_t readLastReadCounter(const std::string& peerHex) const;

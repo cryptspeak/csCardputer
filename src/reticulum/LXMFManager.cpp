@@ -10,7 +10,16 @@ std::map<std::string, LXMFManager::PendingProof> LXMFManager::_pendingProofs;
 
 namespace {
 constexpr unsigned long LXMF_DISCOVERY_RETRY_INTERVAL_MS = 10000;
-constexpr int LXMF_DISCOVERY_MAX_ATTEMPTS = 7;  // immediate attempt + six 10s retries ~= 60s
+// Immediate attempt + N-1 10s retries. A flat 60s (the old budget of 7) is
+// only enough for a peer within direct earshot to answer. Behind a transport
+// node -- e.g. a multi-interface LoRa gateway bridging to the internet --
+// the request has to make it out over LoRa, get relayed, and the response
+// has to make the same trip back, all at LoRa's airtime/duty-cycle pace;
+// 60s routinely isn't enough, and giving up that fast either fails the
+// message outright or hands it to a propagation node when direct delivery
+// would've worked fine given a few more seconds. ~3 minutes still bounds
+// the wait, just no longer assumes every peer is one hop away.
+constexpr int LXMF_DISCOVERY_MAX_ATTEMPTS = 18;
 constexpr unsigned long LXMF_LINK_ESTABLISH_TIMEOUT_MS = 30000;
 
 // LXMF's "version 0.5.0+" announce app_data format: a msgpack array of
@@ -464,6 +473,41 @@ void LXMFManager::onPacketReceived(const RNS::Bytes& data, const RNS::Packet& pa
     fullData.insert(fullData.end(), destHash.data(), destHash.data() + destHash.size());
     fullData.insert(fullData.end(), data.data(), data.data() + data.size());
     _instance->processIncoming(fullData.data(), fullData.size(), destHash);
+
+    // Reply routing (sendDirect()) goes purely off Transport's path table,
+    // which is populated/refreshed only by announces -- receiving a message
+    // never touches it. If an older announce for this sender is still on
+    // file (e.g. heard via a TCP hub that also bridges this same peer, with
+    // more hops on record), every reply keeps going out that stale route
+    // even while the sender is right here talking to us directly. Transport
+    // bumps a packet's hop count by exactly 1 on every receipt (see
+    // Transport::inbound()), so hops()==1 is the strongest available signal
+    // that this is genuine, unrelayed point-to-point traffic on
+    // `packet.receiving_interface()`. When the path on file disagrees,
+    // nudge a path request so the table can correct itself on its own terms
+    // (a fresh, equal-or-lower-hop announce always wins, per Transport's own
+    // replacement rule) instead of silently keeping the wrong route until
+    // the peer happens to re-announce on its own schedule.
+    if (data.size() >= 16 && packet.hops() == 1) {
+        RNS::Bytes sourceHash(data.data(), 16);
+        RNS::Interface known = RNS::Transport::next_hop_interface(sourceHash);
+        if (!known || known != packet.receiving_interface()) {
+            std::string key = sourceHash.toHex();
+            unsigned long now = millis();
+            auto it = _instance->_lastPathRefresh.find(key);
+            if (it == _instance->_lastPathRefresh.end() || now - it->second >= 10000UL) {
+                _instance->_lastPathRefresh[key] = now;
+                RNS::Transport::request_path(sourceHash);
+                // Unbounded over long uptime otherwise -- every distinct
+                // sender ever heard direct adds an entry that never expires
+                // on its own. Cheap, arbitrary cap; this is a throttle, not
+                // a record that needs to survive eviction.
+                while (_instance->_lastPathRefresh.size() > 50) {
+                    _instance->_lastPathRefresh.erase(_instance->_lastPathRefresh.begin());
+                }
+            }
+        }
+    }
 }
 
 void LXMFManager::onOutLinkEstablished(RNS::Link& link) {
@@ -793,6 +837,27 @@ bool LXMFManager::tryPropagationFallback(LXMFMessage& msg) {
                                                      transientId, stampCost);
     if (outcome != PropagationClient::SubmitOutcome::STARTED) return false;
 
+    // Same stamp-cost gating as direct delivery (sendDirect() above) -- a PN
+    // can advertise an arbitrarily high stamp_cost in its announce, and
+    // unlike direct delivery this path had no ceiling check at all. Brute-
+    // forcing even a handful of bits past the ceiling can take far longer
+    // than is practical on this CPU; without this check that grind would
+    // occupy the single stamp-task/PN-flow slot indefinitely, permanently
+    // blocking every other queued message (PN or direct) behind it and
+    // eventually filling _outQueue with messages that can never send.
+    std::string peerHex = msg.destHash.toHex();
+    if (stampCost > _stampCostCeiling && !_stampApprovedOverCeiling.count(peerHex)) {
+        _propagation->abortSubmission();
+        msg.status = LXMFStatus::STAMPING;
+        if (!_stampAwaitingConfirm.count(peerHex)) {
+            _stampAwaitingConfirm.insert(peerHex);
+            Serial.printf("[LXMF] PN stamp cost %d for %s exceeds ceiling %d -- awaiting confirm\n",
+                          stampCost, peerHex.substr(0, 8).c_str(), _stampCostCeiling);
+            if (_stampConfirmCb) _stampConfirmCb(peerHex, stampCost);
+        }
+        return true;  // keep queued -- confirmStamping() decides FAILED vs proceed
+    }
+
     msg.status = LXMFStatus::STAMPING;
     Serial.printf("[LXMF] No direct route to %s -- handing off to propagation node (stamp cost=%d)\n",
                   msg.destHash.toHex().substr(0, 8).c_str(), stampCost);
@@ -902,8 +967,20 @@ void LXMFManager::confirmStamping(const std::string& peerHex, bool proceed) {
 
     if (proceed) {
         _stampApprovedOverCeiling.insert(peerHex);
-        // Next sendDirect() pass for this peer's queued message(s) will see
-        // the peer in _stampApprovedOverCeiling and proceed to beginStamping().
+        // sendDirect() bails immediately on any STAMPING-status message
+        // (see its top-of-function guard) -- that's correct while a grind
+        // or PN handoff is actually in flight, but the messages parked here
+        // were only marked STAMPING to *hold* them during the confirm
+        // prompt, with nothing in flight yet. Reset to QUEUED so the next
+        // loop() pass actually re-enters stamp gating, sees this peer now
+        // in _stampApprovedOverCeiling, and proceeds (beginStamping() or
+        // tryPropagationFallback()) -- without this they'd sit in _outQueue
+        // forever, occupying a slot and never sending.
+        for (auto& msg : _outQueue) {
+            if (msg.destHash.toHex() != peerHex || msg.status != LXMFStatus::STAMPING) continue;
+            msg.status = LXMFStatus::QUEUED;
+            msg.lastRetryMs = 0;
+        }
         return;
     }
 

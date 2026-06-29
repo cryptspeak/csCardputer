@@ -453,7 +453,12 @@ void SettingsScreen::addTCPConnection(const std::string& host, uint16_t port) {
 
     s.tcpConnections.push_back(ep);
     applyAndSave();
-    showToast("Added! Reboot to connect");
+    if (_tcpReloadCb) {
+        _tcpReloadCb();
+        showToast("Added & connecting");
+    } else {
+        showToast("Added! Reboot to connect");
+    }
     buildTCPMenu();
 }
 
@@ -464,6 +469,12 @@ void SettingsScreen::toggleTCPConnection(int index) {
 
     s.tcpConnections[index].autoConnect = !s.tcpConnections[index].autoConnect;
     applyAndSave();
+    // Apply immediately -- previously this only took effect after a reboot,
+    // since the live TCPClientInterface set is owned by main.cpp and nothing
+    // here ever told it to rebuild. Disabling a connection without this left
+    // its interface registered with Transport (still possibly the "best"
+    // path for some destinations) until a reboot finally tore it down.
+    if (_tcpReloadCb) _tcpReloadCb();
     buildTCPMenu();
 }
 
@@ -474,6 +485,7 @@ void SettingsScreen::removeTCPConnection(int index) {
 
     s.tcpConnections.erase(s.tcpConnections.begin() + index);
     applyAndSave();
+    if (_tcpReloadCb) _tcpReloadCb();
     showToast("Removed");
     buildTCPMenu();
 }

@@ -373,6 +373,42 @@ void MessageStore::migrateOldFilenames() {
     }
 }
 
+std::string MessageStore::resolveConversationPeerHex(const String& dirPath, bool useSD) const {
+    File d = useSD ? _sd->openDir(dirPath.c_str()) : _flash->openDir(dirPath.c_str());
+    if (!d || !d.isDirectory()) return "";
+
+    std::string result;
+    File entry = d.openNextFile();
+    while (entry) {
+        if (!entry.isDirectory()) {
+            String name = entry.name();
+            if (!name.startsWith(".") && name.endsWith(".json")) {
+                String raw = useSD ? _sd->readString((dirPath + "/" + name).c_str())
+                                    : _flash->readString((dirPath + "/" + name).c_str());
+                if (raw.length() > 0) {
+                    String json = maybeDecrypt(_identity, raw);
+                    if (json.length() > 0) {
+                        JsonDocument doc;
+                        if (!deserializeJson(doc, json)) {
+                            bool incoming = doc["incoming"] | false;
+                            std::string hex = incoming ? (doc["src"] | "") : (doc["dst"] | "");
+                            if (!hex.empty()) {
+                                entry.close();
+                                result = hex;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        entry.close();
+        entry = d.openNextFile();
+    }
+    d.close();
+    return result;
+}
+
 void MessageStore::refreshConversations() {
     _conversations.clear();
 
@@ -384,7 +420,10 @@ void MessageStore::refreshConversations() {
                 File entry = dir.openNextFile();
                 while (entry) {
                     if (entry.isDirectory()) {
-                        _conversations.push_back(entry.name());
+                        std::string dirName = entry.name();
+                        std::string fullHex = resolveConversationPeerHex(
+                            String(SD_PATH_MESSAGES) + "/" + entry.name(), true);
+                        _conversations.push_back(fullHex.empty() ? dirName : fullHex);
                     }
                     entry.close();
                     entry = dir.openNextFile();
@@ -400,12 +439,15 @@ void MessageStore::refreshConversations() {
             File entry = dir.openNextFile();
             while (entry) {
                 if (entry.isDirectory()) {
-                    std::string name = entry.name();
+                    std::string dirName = entry.name();
+                    std::string fullHex = resolveConversationPeerHex(
+                        String(PATH_MESSAGES) + "/" + entry.name(), false);
+                    std::string key = fullHex.empty() ? dirName : fullHex;
                     bool found = false;
                     for (auto& c : _conversations) {
-                        if (c == name) { found = true; break; }
+                        if (c == key) { found = true; break; }
                     }
-                    if (!found) _conversations.push_back(name);
+                    if (!found) _conversations.push_back(key);
                 }
                 entry.close();
                 entry = dir.openNextFile();

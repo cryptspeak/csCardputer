@@ -60,6 +60,14 @@ public:
     using OpenDiagnosticsCallback = std::function<void()>;
     void setOpenDiagnosticsCallback(OpenDiagnosticsCallback cb) { _openDiagnosticsCb = cb; }
 
+    // Fired after a TCP Connections edit (toggle/add/remove) so main.cpp can
+    // tear down and recreate the live TCPClientInterface set from the new
+    // config immediately -- without this, edits here only took effect after
+    // a manual reboot (the interfaces are owned/registered with Transport in
+    // main.cpp, not here, so this screen can't do it directly).
+    using TCPReloadCallback = std::function<void()>;
+    void setTCPReloadCallback(TCPReloadCallback cb) { _tcpReloadCb = cb; }
+
 private:
     enum SubMenu { MENU_MAIN, MENU_RADIO, MENU_WIFI, MENU_TCP, MENU_SDCARD,
                    MENU_DISPLAY, MENU_AUDIO, MENU_ABOUT, MENU_WIFI_SCAN, MENU_THEME,
@@ -142,6 +150,7 @@ private:
     std::string _editLabel;
     BackCallback _backCb;
     OpenDiagnosticsCallback _openDiagnosticsCb;
+    TCPReloadCallback _tcpReloadCb;
 
     // Duress password — small popups drawn on top of this screen (never a
     // full-screen takeover). Selecting "Duress Password" in Security opens

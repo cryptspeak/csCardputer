@@ -48,6 +48,7 @@ void MessagesScreen::refreshList() {
 
     _lastRefresh = millis();
     _needsRefresh = false;
+    if (_am) _lastNameVersion = _am->nameVersion();
 }
 
 void MessagesScreen::showContextMenu(int idx) {
@@ -97,6 +98,9 @@ void MessagesScreen::exitContextMenu() {
 }
 
 void MessagesScreen::render(M5Canvas& canvas) {
+    if (!_needsRefresh && _am && _am->nameVersion() != _lastNameVersion) {
+        _needsRefresh = true;
+    }
     if (_needsRefresh) {
         refreshList();
     }

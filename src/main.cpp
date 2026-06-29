@@ -1155,10 +1155,15 @@ void setup() {
     // Initialize message store + LXMF
     bootScreen.setProgress(0.91f, "Starting messaging...");
     ui.render();
-    messageStore.begin(&flash, &sdStore);
-    // Pass the loaded identity so messages are encrypted at rest. Identity
-    // outlives messageStore (both are file-scope globals).
+    // Identity must be set before begin() -- begin() calls refreshConversations(),
+    // which decrypts each conversation's saved messages to recover the peer's
+    // full hash (see MessageStore::resolveConversationPeerHex). Without an
+    // identity at that point, every encrypted conversation fails to decrypt
+    // and silently falls back to the truncated directory name, breaking
+    // sending until the next full reboot does the same thing again.
+    // Identity outlives messageStore (both are file-scope globals).
     messageStore.setIdentity(&rns.identity());
+    messageStore.begin(&flash, &sdStore);
     lxmf.begin(&rns, &messageStore);
 
     // Legacy identity → run mandatory migration flow now that messageStore
@@ -1226,6 +1231,18 @@ void setup() {
     announceManager->loadNameCache();
     announceHandler = RNS::HAnnounceHandler(announceManager);
     RNS::Transport::register_announce_handler(announceHandler);
+
+    // Path table is intentionally never persisted across reboots (see the
+    // comment above ReticulumManager::begin()'s LoRa setup) -- it's rebuilt
+    // purely from announces. That means every saved contact is unreachable
+    // after every boot until they happen to re-announce on their own
+    // schedule, even though we already know exactly who they are. Request
+    // paths for all of them now so reachability comes back proactively
+    // (anyone in range, or behind a gateway bridging in from elsewhere,
+    // answers within seconds) instead of waiting on chance.
+    for (const auto& node : announceManager->nodes()) {
+        if (node.saved) RNS::Transport::request_path(node.hash);
+    }
 
     // Propagation-node discovery — separate handler/aspect so PN announces
     // don't get folded into the lxmf.delivery contact list above.
@@ -1430,6 +1447,9 @@ void setup() {
 #endif
     settingsScreen.setOpenDiagnosticsCallback([]() {
         ui.setScreen(&radioDiagnosticsScreen);
+    });
+    settingsScreen.setTCPReloadCallback([]() {
+        reloadTCPClients();
     });
 
     radioSetupScreen.setUserConfig(&userConfig);

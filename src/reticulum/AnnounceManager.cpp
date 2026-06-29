@@ -291,6 +291,7 @@ void AnnounceManager::received_announce(
         if (node.lastSeen != 0 && now - node.lastSeen < ANNOUNCE_MIN_INTERVAL_MS) return;
         if (!name.empty()) {
             node.name = name;
+            _nameVersion++;
             std::string destHex = destination_hash.toHex();
             _nameCache[destHex] = name;
             while ((int)_nameCache.size() > MAX_NAME_CACHE) {
@@ -352,6 +353,7 @@ void AnnounceManager::received_announce(
     if (_loraIf) { node.rssi = _loraIf->lastRxRssi(); node.snr = _loraIf->lastRxSnr(); }
     _hashIndex[key] = (int)_nodes.size();
     _nodes.push_back(node);
+    if (!name.empty()) _nameVersion++;
     if (!name.empty()) {
         _nameCache[destHex] = name;
         while ((int)_nameCache.size() > MAX_NAME_CACHE) {
@@ -393,7 +395,7 @@ void AnnounceManager::addManualContact(const std::string& hexHash, const std::st
     auto it = _hashIndex.find(key);
     if (it != _hashIndex.end()) {
         auto& node = _nodes[it->second];
-        if (!safeName.empty()) node.name = safeName;
+        if (!safeName.empty()) { node.name = safeName; _nameVersion++; }
         node.saved = true;
         saveContact(node);
         return;
@@ -406,6 +408,7 @@ void AnnounceManager::addManualContact(const std::string& hexHash, const std::st
     node.saved = true;
     _hashIndex[key] = (int)_nodes.size();
     _nodes.push_back(node);
+    if (!safeName.empty()) _nameVersion++;
     saveContact(node);
 }
 

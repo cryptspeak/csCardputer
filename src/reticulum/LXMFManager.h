@@ -140,6 +140,10 @@ private:
     std::vector<LXMFMessage> _incomingQueue;
     static constexpr int MAX_INCOMING_QUEUE = 8;
 
+    // Throttles the path-refresh request_path() calls in onPacketReceived()
+    // (see there) to once per sender per 10s, keyed by source hash hex.
+    std::map<std::string, unsigned long> _lastPathRefresh;
+
     struct PendingProof {
         std::string peerHex;
         double timestamp = 0;

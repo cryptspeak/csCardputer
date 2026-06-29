@@ -67,6 +67,15 @@ public:
     const std::vector<DiscoveredNode>& nodes() const { return _nodes; }
     int nodeCount() const { return _nodes.size(); }
 
+    // Bumped every time a node's display name is learned/changed from an
+    // announce. Screens that cache a peer-hex -> name label (e.g.
+    // MessagesScreen's conversation list) only rebuild that label on their
+    // own onEnter()/explicit refresh -- an announce arriving while such a
+    // screen is already on-screen wouldn't otherwise reach it. Cheap to
+    // poll once per render() and compare against a locally cached value,
+    // same pattern NodesScreen already uses for nodeCount().
+    uint32_t nameVersion() const { return _nameVersion; }
+
     // Find node by hash
     const DiscoveredNode* findNode(const RNS::Bytes& hash) const;
     const DiscoveredNode* findNodeByHex(const std::string& hexHash) const;
@@ -105,6 +114,7 @@ private:
     RNS::Bytes _localDestHash;
     bool _contactsDirty = false;
     bool _nameCacheDirty = false;
+    uint32_t _nameVersion = 0;
     unsigned long _lastContactSave = 0;
     unsigned long _lastNameCacheSave = 0;
     std::map<std::string, std::string> _nameCache;  // hexHash → displayName

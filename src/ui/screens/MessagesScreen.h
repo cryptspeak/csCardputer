@@ -41,6 +41,10 @@ private:
     OpenConversationCb _openCb;
     AddContactCb _addContactCb;
     bool _needsRefresh = false;
+    // Tracks AnnounceManager::nameVersion() so a name learned from an
+    // announce while this screen is already on-screen still gets picked up
+    // (labels are otherwise only rebuilt on onEnter() or notifyNewMessage()).
+    uint32_t _lastNameVersion = 0;
 
     // Context menu (triggered by Delete key)
     bool _showingContext = false;

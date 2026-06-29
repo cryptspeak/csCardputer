@@ -14,13 +14,29 @@ constexpr unsigned long PN_LINK_TIMEOUT_MS = 30000;
 constexpr unsigned long PN_DISCOVERY_TIMEOUT_MS = 60000;
 constexpr unsigned long PN_DISCOVERY_RETRY_INTERVAL_MS = 10000;
 constexpr double PN_REQUEST_TIMEOUT_S = 15.0;
+// Backstop for SubmitState::PREPARED -- normally left by proceedSubmission()
+// (immediately, or once the background stamp grind in LXMFManager produces a
+// result/failure). Nothing else in this state machine times that grind out,
+// so an unreasonably high PN-advertised stamp cost the user approved anyway
+// (or a stuck/misbehaving stamp task) would otherwise hold this single PN
+// flow slot -- and therefore every other queued PN/direct message behind it
+// -- forever. Generous on purpose: a legitimate, approved high-cost grind
+// should still be allowed to finish.
+constexpr unsigned long PN_STAMP_TIMEOUT_MS = 10UL * 60UL * 1000UL;
 // Our own cap on how much a PN should hand back in one "/get" transfer
 // response (LXMRouter.py's `client_transfer_limit`, sent as the request's
 // 3rd array element) -- this is the REQUESTER's own preference, not the
 // PN's announced sync_limit (that's a separate, unrelated field describing
 // what the PN is willing to accept from incoming syncs). Kept small given
 // this device's ~55KB free heap / no PSRAM.
-constexpr int PN_CLIENT_TRANSFER_LIMIT_KB = 32;
+constexpr int PN_CLIENT_TRANSFER_LIMIT_KB = 16;
+// Floor for ESP.getFreeHeap() below which we refuse to start a sync, or to
+// request the (up to PN_CLIENT_TRANSFER_LIMIT_KB) message-list transfer once
+// a sync is already under way. Sized so even a full-limit response plus the
+// Link/Resource overhead of receiving it has real headroom left over on a
+// ~55KB-free, no-PSRAM device, rather than gambling on a malloc that might
+// fail mid-transfer.
+constexpr uint32_t PN_SYNC_MIN_HEAP = 30000;
 
 // msgpack-packs [time.time(), [lxmf_data]] -- the PROPAGATED wire envelope
 // (LXMessage.pack()'s propagation_packed, see LXMessage.py:433). Small,
@@ -306,6 +322,7 @@ PropagationClient::SubmitOutcome PropagationClient::prepareSubmission(
     _submitPnHash = pnHash;
     _submitLxmfData = lxmfData;
     _submitState = SubmitState::PREPARED;
+    _submitStateSinceMs = millis();
 
     transientIdOut = transientId;
     stampCostOut = stampCost;
@@ -421,6 +438,18 @@ bool PropagationClient::startSync(const RNS::Bytes& pnHash, const RNS::Identity&
                                    DecodedMessageCallback onMessage, SyncDoneCallback onDone) {
     if (_syncState != SyncState::IDLE) return false;
 
+    // A sync's message-list response can be up to PN_CLIENT_TRANSFER_LIMIT_KB
+    // in one allocation, on top of whatever Link/Resource bookkeeping it
+    // takes to receive it -- on this device's heap (no PSRAM), starting that
+    // while already low risks a failed allocation mid-transfer rather than
+    // a clean failure. Refuse up front instead; the caller can retry once
+    // memory pressure (other traffic, UI, etc.) has eased.
+    if (ESP.getFreeHeap() < PN_SYNC_MIN_HEAP) {
+        Serial.printf("[PN] Sync refused: free heap %u below safety margin\n",
+                      (unsigned)ESP.getFreeHeap());
+        return false;
+    }
+
     _syncPnHash = pnHash;
     _syncIdentity = &ourIdentity;
     _onMessage = onMessage;
@@ -506,6 +535,13 @@ void PropagationClient::handleListResponse(const RNS::Bytes& response) {
     }
 
     Serial.printf("[PN] %d message(s) waiting\n", (int)ids.size());
+
+    if (ESP.getFreeHeap() < PN_SYNC_MIN_HEAP) {
+        Serial.printf("[PN] Sync aborted before transfer: free heap %u below safety margin\n",
+                      (unsigned)ESP.getFreeHeap());
+        finishSync(false);
+        return;
+    }
 
     // No persisted "already delivered" set on this device -- see
     // docs/propagation-nodes.md for why that's a deliberate simplification,
@@ -615,6 +651,12 @@ void PropagationClient::loop() {
     if (_submitState == SubmitState::LINKING
         && now - _submitStateSinceMs >= PN_LINK_TIMEOUT_MS) {
         Serial.println("[PN] Submission link establishment timed out");
+        finishSubmit(false);
+    }
+
+    if (_submitState == SubmitState::PREPARED
+        && now - _submitStateSinceMs >= PN_STAMP_TIMEOUT_MS) {
+        Serial.println("[PN] Submission stamp grind timed out -- giving up");
         finishSubmit(false);
     }
 
