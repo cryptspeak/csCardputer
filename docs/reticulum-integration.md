@@ -3,9 +3,11 @@
 Module: [`src/reticulum/ReticulumManager.{h,cpp}`](../src/reticulum/ReticulumManager.h)
 
 This is the layer between the firmware and
-[microReticulum](https://github.com/ratspeak/microReticulum) (a fork,
-pinned to a specific commit in `platformio.ini`'s `lib_deps` — not
-vendored in this repo). `ReticulumManager` owns the `RNS::Reticulum`
+[microReticulum](https://github.com/ratspeak/microReticulum) (a fork),
+pinned to a specific commit of a personal fork of that fork
+([0x00001312/microReticulum](https://github.com/0x00001312/microReticulum))
+in `platformio.ini`'s `lib_deps` — not vendored in this repo.
+`ReticulumManager` owns the `RNS::Reticulum`
 instance, the `RNS::Identity`, the LXMF delivery `RNS::Destination`, and
 the LoRa interface registration. Everything else that needs the
 identity (`MessageStore`, `AnnounceManager`, `UserConfig`) gets it from

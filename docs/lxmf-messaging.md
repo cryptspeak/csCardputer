@@ -9,6 +9,11 @@ directly — it always goes through `MessageStore`, which applies at-rest
 encryption (see [encryption-messages.md](encryption-messages.md)) and
 file-format details.
 
+This doc covers the direct-delivery path. Anti-spam proof-of-work
+stamps and store-and-forward propagation nodes (offline messaging) are
+separate concerns layered on top — see [lxmf-stamps.md](lxmf-stamps.md)
+and [propagation-nodes.md](propagation-nodes.md).
+
 ## Outgoing flow
 
 ```
