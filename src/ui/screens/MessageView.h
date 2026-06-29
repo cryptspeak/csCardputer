@@ -25,6 +25,11 @@ public:
     // Status callback — update chat line color when send completes
     void notifyStatusChange(const std::string& peerHex, double timestamp, LXMFStatus status);
 
+    // Route transparency — tags the most recent outgoing line with how it
+    // was actually sent (e.g. "[LoRa]", "[PN/TCP]"). No new UI elements,
+    // just appended to the existing status line.
+    void notifyRouteInfo(const std::string& peerHex, const std::string& routeTag);
+
     // Callback to return to messages list
     using BackCallback = std::function<void()>;
     void setBackCallback(BackCallback cb) { _backCb = cb; }

@@ -17,6 +17,8 @@
 #include "input/Keyboard.h"
 #include "config/Config.h"
 #include "ui/screens/PasswordScreen.h"
+#include "reticulum/LXMFManager.h"
+#include "reticulum/PropagationClient.h"
 #if HAS_GPS
 #include "hal/GPSManager.h"
 #endif
@@ -42,6 +44,8 @@ public:
     void setTCPClients(std::vector<TCPClientInterface*>* clients) { _tcpClients = clients; }
     void setRNS(ReticulumManager* rns) { _rns = rns; }
     void setIdentityHash(const String& hash) { _identityHash = hash; }
+    void setLXMF(LXMFManager* lxmf) { _lxmf = lxmf; }
+    void setPropagationClient(PropagationClient* pc) { _propagation = pc; }
 #if HAS_GPS
     void setGPS(GPSManager* gps) { _gps = gps; }
 #endif
@@ -60,9 +64,14 @@ private:
     enum SubMenu { MENU_MAIN, MENU_RADIO, MENU_WIFI, MENU_TCP, MENU_SDCARD,
                    MENU_DISPLAY, MENU_AUDIO, MENU_ABOUT, MENU_WIFI_SCAN, MENU_THEME,
                    MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER, MENU_TIME,
-                   MENU_SECURITY, MENU_AUTOLOCK, MENU_RADIO_CONFIG };
+                   MENU_SECURITY, MENU_AUTOLOCK, MENU_RADIO_CONFIG, MENU_MESSAGING,
+                   MENU_PROPAGATION, MENU_PN_SELECT };
 
     void buildMainMenu();
+    void buildMessagingMenu();
+    void buildPropagationMenu();
+    void buildPNSelectMenu();
+    void selectPropagationNode(int index);
     void buildRadioMenu();
     void buildRadioConfigMenu();
     void buildWiFiMenu();
@@ -116,6 +125,9 @@ private:
     WiFiInterface* _wifi = nullptr;
     std::vector<TCPClientInterface*>* _tcpClients = nullptr;
     ReticulumManager* _rns = nullptr;
+    LXMFManager* _lxmf = nullptr;
+    PropagationClient* _propagation = nullptr;
+    bool _syncWasInFlight = false;  // detects sync-finished transition in tick() to refresh the menu
     String _identityHash;
 #if HAS_GPS
     GPSManager* _gps = nullptr;

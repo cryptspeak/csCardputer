@@ -324,6 +324,22 @@ void MessageView::notifyStatusChange(const std::string& peerHex, double timestam
     }
 }
 
+void MessageView::notifyRouteInfo(const std::string& peerHex, const std::string& routeTag) {
+    if (peerHex != _peerHex || routeTag.empty()) return;
+
+    // Most recent outgoing line — strip any previous tag (a retry may have
+    // gone out a different way) and append the current one.
+    for (int i = _chatLines.size() - 1; i >= 0; i--) {
+        auto& line = _chatLines[i];
+        if (line.text.find("you>") != std::string::npos) {
+            size_t tagPos = line.text.rfind("  [");
+            if (tagPos != std::string::npos) line.text.erase(tagPos);
+            line.text += "  [" + routeTag + "]";
+            break;
+        }
+    }
+}
+
 void MessageView::sendCurrentInput() {
     if (!_lxmf || _peerHex.empty()) return;
 

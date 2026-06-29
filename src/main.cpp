@@ -22,6 +22,7 @@
 #include "storage/MessageStore.h"
 #include "reticulum/ReticulumManager.h"
 #include "reticulum/AnnounceManager.h"
+#include "reticulum/PropagationClient.h"
 #include "reticulum/LXMFManager.h"
 #include "transport/WiFiInterface.h"
 #include "transport/TCPClientInterface.h"
@@ -35,6 +36,7 @@
 #include "ui/screens/NameInputScreen.h"
 #include "ui/screens/DataCleanScreen.h"
 #include "ui/screens/HelpOverlay.h"
+#include "ui/screens/StampConfirmOverlay.h"
 #include "ui/screens/RadioSetupScreen.h"
 #include "ui/screens/RadioDiagnosticsScreen.h"
 #include "ui/screens/PasswordScreen.h"
@@ -76,6 +78,8 @@ MessageStore messageStore;
 ReticulumManager rns;
 AnnounceManager* announceManager = nullptr;
 RNS::HAnnounceHandler announceHandler;
+PropagationClient* propagationClient = nullptr;
+RNS::HAnnounceHandler propagationAnnounceHandler;
 LXMFManager lxmf;
 WiFiInterface* wifiImpl = nullptr;
 RNS::Interface wifiIface({RNS::Type::NONE});
@@ -106,6 +110,7 @@ SettingsScreen settingsScreen;
 RadioSetupScreen radioSetupScreen;
 RadioDiagnosticsScreen radioDiagnosticsScreen;
 HelpOverlay helpOverlay;
+StampConfirmOverlay stampConfirmOverlay;
 PasswordScreen passwordScreen;
 MigrationWarningScreen migrationScreen;
 
@@ -1183,6 +1188,26 @@ void setup() {
         ui.markContentDirty();
     });
 
+    // Route transparency — which interface (and whether a propagation node
+    // was used) a send actually went out over. See LXMFManager::RouteInfoCallback.
+    lxmf.setRouteInfoCallback([](const std::string& peerHex, const std::string& routeTag) {
+        messageView.notifyRouteInfo(peerHex, routeTag);
+        ui.markContentDirty();
+    });
+
+    // Anti-spam stamps (see LXStamper.h / docs/lxmf-stamps.md). Ceiling is
+    // user-configurable (Settings); above it, this overlay asks before any
+    // CPU time is spent. The ceiling value itself is applied further down,
+    // after userConfig.load() — the config file isn't read yet at this point.
+    lxmf.setStampConfirmCallback([](const std::string& peerHex, int cost) {
+        std::string name = announceManager ? announceManager->lookupName(peerHex) : "";
+        stampConfirmOverlay.show(name, peerHex, cost, [peerHex](bool proceed) {
+            lxmf.confirmStamping(peerHex, proceed);
+        });
+        ui.setOverlay(&stampConfirmOverlay);
+        ui.markContentDirty();
+    });
+
     // Unread counts load lazily on first MessagesScreen open (deferred from boot)
 
     // Register announce handler
@@ -1201,6 +1226,17 @@ void setup() {
     announceManager->loadNameCache();
     announceHandler = RNS::HAnnounceHandler(announceManager);
     RNS::Transport::register_announce_handler(announceHandler);
+
+    // Propagation-node discovery — separate handler/aspect so PN announces
+    // don't get folded into the lxmf.delivery contact list above.
+    propagationClient = new PropagationClient();
+    propagationAnnounceHandler = RNS::HAnnounceHandler(propagationClient);
+    RNS::Transport::register_announce_handler(propagationAnnounceHandler);
+    lxmf.setPropagationClient(propagationClient);
+    // Cross-reference so a PN's operator identity never gets passively
+    // discovered as a regular contact (see AnnounceManager::setPropagationClient).
+    announceManager->setPropagationClient(propagationClient);
+
     if (announceManager->encryptionEnabled()) {
         // Re-save once so any pre-upgrade plaintext contact files and name
         // cache are encrypted immediately rather than waiting for the next
@@ -1325,6 +1361,14 @@ void setup() {
     audio.setVolume(userConfig.settings().audioVolume);
     audio.begin();
 
+    lxmf.setStampCostCeiling(userConfig.settings().stampCostCeiling);
+    if (userConfig.settings().propagationNodeEnabled
+        && userConfig.settings().propagationNodeHash.length() == 32) {
+        RNS::Bytes pnHash;
+        pnHash.assignHex(userConfig.settings().propagationNodeHash.c_str());
+        lxmf.setPreferredPropagationNode(pnHash);
+    }
+
     // Boot complete
     delay(200);
     bootScreen.setProgress(1.0f, "Ready");
@@ -1378,6 +1422,8 @@ void setup() {
     settingsScreen.setWiFi(wifiImpl);
     settingsScreen.setTCPClients(&tcpClients);
     settingsScreen.setRNS(&rns);
+    settingsScreen.setLXMF(&lxmf);
+    settingsScreen.setPropagationClient(propagationClient);
     settingsScreen.setIdentityHash(rns.destinationHashHex());
 #if HAS_GPS
     settingsScreen.setGPS(&gps);
@@ -1531,6 +1577,10 @@ void loop() {
 
         if (ui.isBootMode()) {
             ui.handleKey(evt);
+        }
+        else if (stampConfirmOverlay.isVisible()) {
+            stampConfirmOverlay.handleKey(evt);
+            ui.setOverlay(stampConfirmOverlay.isVisible() ? &stampConfirmOverlay : nullptr);
         }
         else if (helpOverlay.isVisible()) {
             helpOverlay.handleKey(evt);

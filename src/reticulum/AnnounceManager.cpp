@@ -1,4 +1,5 @@
 #include "AnnounceManager.h"
+#include "PropagationClient.h"
 #include "config/Config.h"
 #include "storage/SDStore.h"
 #include "storage/FlashStore.h"
@@ -257,6 +258,31 @@ void AnnounceManager::received_announce(
 
     std::string key = makeKey(destination_hash);
     unsigned long now = millis();
+    uint8_t hops = RNS::Transport::hops_to(destination_hash);
+
+    // A PN's operator identity belongs exclusively in the Propagation Node
+    // picker, never here -- even though it may also legitimately announce
+    // an unrelated lxmf.delivery destination under the same identity (e.g.
+    // a NomadNet node with propagation enabled). Don't disturb an already
+    // explicitly-saved contact (that's a deliberate user choice), but drop
+    // a passively-discovered, not-yet-saved entry the moment we learn its
+    // identity also runs a PN, and don't create a new one.
+    if (_propagation && announced_identity &&
+        _propagation->isPnIdentity(announced_identity.hash())) {
+        auto pnIt = _hashIndex.find(key);
+        if (pnIt != _hashIndex.end() && !_nodes[pnIt->second].saved) {
+            int idx = pnIt->second;
+            int lastIdx = (int)_nodes.size() - 1;
+            if (idx != lastIdx) {
+                std::string swapKey = makeKey(_nodes[lastIdx].hash);
+                _hashIndex[swapKey] = idx;
+                std::swap(_nodes[idx], _nodes[lastIdx]);
+            }
+            _hashIndex.erase(makeKey(_nodes[lastIdx].hash));
+            _nodes.pop_back();
+        }
+        return;
+    }
 
     // O(1) lookup for existing node
     auto it = _hashIndex.find(key);
@@ -273,12 +299,12 @@ void AnnounceManager::received_announce(
             _nameCacheDirty = true;
         }
         node.lastSeen = now;
+        node.hops = hops;  // keep current for every node, not just saved contacts
         if (_loraIf) { node.rssi = _loraIf->lastRxRssi(); node.snr = _loraIf->lastRxSnr(); }
         if (node.saved) {
-            // Contacts: full processing — update hops, persist, cache name
+            // Contacts: full processing — persist, cache name
             std::string idHex = announced_identity ? announced_identity.hexhash() : "";
             if (!idHex.empty()) node.identityHex = idHex;
-            node.hops = RNS::Transport::hops_to(destination_hash);
             _contactsDirty = true;
         }
         return;
@@ -322,6 +348,7 @@ void AnnounceManager::received_announce(
     node.hash = destination_hash;
     node.name = name.empty() ? destHex.substr(0, 12) : name;
     node.lastSeen = millis();
+    node.hops = hops;
     if (_loraIf) { node.rssi = _loraIf->lastRxRssi(); node.snr = _loraIf->lastRxSnr(); }
     _hashIndex[key] = (int)_nodes.size();
     _nodes.push_back(node);

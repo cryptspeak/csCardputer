@@ -1,12 +1,17 @@
 #pragma once
 
 #include "LXMFMessage.h"
+#include "LXStamper.h"
+#include "PropagationClient.h"
 #include "ReticulumManager.h"
 #include "storage/MessageStore.h"
 #include <Destination.h>
 #include <Packet.h>
 #include <Link.h>
 #include <Identity.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
 #include <functional>
 #include <deque>
 #include <set>
@@ -29,6 +34,13 @@ public:
     // Status callback (fires when send completes with SENT/FAILED)
     void setStatusCallback(StatusCallback cb) { _statusCb = cb; }
 
+    // Fires once per successful send (direct or PN handoff) with a short
+    // tag describing how it actually went out -- e.g. "LoRa", "TCP",
+    // "PN/LoRa" -- so the UI can show real routing instead of leaving the
+    // user to guess whether propagation-node fallback was used.
+    using RouteInfoCallback = std::function<void(const std::string& peerHex, const std::string& routeTag)>;
+    void setRouteInfoCallback(RouteInfoCallback cb) { _routeInfoCb = cb; }
+
     // Source hash (our LXMF destination hash)
     RNS::Bytes getSourceHash() const { return _rns ? _rns->destination().hash() : RNS::Bytes(); }
 
@@ -50,6 +62,44 @@ public:
     // Delete a conversation and its messages
     void deleteConversation(const std::string& peerHex);
 
+    // ── Anti-spam stamps (see LXStamper.h) ──────────────────────────────
+    // Costs at or below this are generated automatically in the background;
+    // above it, setStampConfirmCallback() fires before any CPU time is
+    // spent. Default (12) is a few seconds of work on this hardware.
+    void setStampCostCeiling(int ceiling) { _stampCostCeiling = ceiling; }
+    int stampCostCeiling() const { return _stampCostCeiling; }
+
+    // Fired (at most once per peer per session) when a queued message needs
+    // a stamp costlier than the ceiling allows automatically. The message
+    // stays queued -- neither generating nor failed -- until confirmStamping()
+    // is called with the user's answer.
+    using StampConfirmCallback = std::function<void(const std::string& peerHex, int cost)>;
+    void setStampConfirmCallback(StampConfirmCallback cb) { _stampConfirmCb = cb; }
+    void confirmStamping(const std::string& peerHex, bool proceed);
+
+    // ── Propagation node (offline messaging) ────────────────────────────
+    // Externally-owned (main.cpp registers it as an AnnounceHandler too,
+    // same lifetime as ReticulumManager). Direct delivery still tried
+    // first, every time -- this is only consulted once direct delivery's
+    // own retry budget is exhausted (see sendDirect()).
+    void setPropagationClient(PropagationClient* pc);
+    // Empty hash (default) disables PN fallback -- messages just FAIL
+    // when direct delivery can't reach the peer, same as before this
+    // feature existed.
+    void setPreferredPropagationNode(const RNS::Bytes& hash) { _propagationNodeHash = hash; }
+
+    // Manually pull mail waiting at the preferred PN. Returns false if no
+    // PN is configured, one isn't reachable yet, or a sync is already
+    // running. Decoded messages flow through the normal incoming pipeline
+    // (dedup/storage/UI) automatically.
+    bool syncPropagationNode();
+    bool propagationSyncInFlight() const;
+    // Status of the last completed sync, for UI display (Settings > Messaging).
+    // lastSyncAtMs() == 0 means "never synced this boot."
+    unsigned long lastSyncAtMs() const { return _lastSyncAtMs; }
+    bool lastSyncOk() const { return _lastSyncOk; }
+    int lastSyncMessageCount() const { return _lastSyncMsgCount; }
+
 private:
     bool sendDirect(LXMFMessage& msg);
     bool ensureOutboundLink(const RNS::Destination& dest, const RNS::Bytes& destHash, const char* reason);
@@ -66,6 +116,7 @@ private:
     MessageStore* _store = nullptr;
     MessageCallback _onMessage;
     StatusCallback _statusCb;
+    RouteInfoCallback _routeInfoCb;
     std::deque<LXMFMessage> _outQueue;
 
     // Outbound link state (opportunistic-first, link upgrades in background)
@@ -102,6 +153,53 @@ private:
     static void onProofTimeout(const RNS::PacketReceipt& receipt);
     static void handleProofTimeoutHash(const std::string& receiptHash);
     void registerProofTracking(RNS::PacketReceipt& receipt, const LXMFMessage& msg);
+
+    // ── Anti-spam stamps ─────────────────────────────────────────────────
+    // Stamp generation is real CPU work (see LXStamper.h) -- it runs on its
+    // own low-priority task on core 0 so it never blocks the main loop
+    // (radio/UI, core 1), exactly one job in flight at a time, matching this
+    // device's "one peer/one flow at a time" design elsewhere (see _outLink).
+    struct StampReq { uint8_t material[32]; int targetCost; int expandRounds; };
+    struct StampRes { uint8_t material[32]; uint8_t stamp[32]; uint8_t ok; };
+    enum class StampPurpose : uint8_t { DIRECT, PROPAGATION };
+
+    void startStampTaskIfNeeded();
+    static void stampTaskFunc(void* param);
+    void pollStampResult();
+    // Begins background generation for `msg` (sets status=STAMPING, submits
+    // to the stamp task). Caller must already hold the single in-flight slot
+    // free (`!_stampInFlight`).
+    void beginStamping(LXMFMessage& msg, int targetCost);
+    // Same background task, but for a propagation-submission stamp (keyed
+    // by transient_id, not messageId -- see PropagationClient::prepareSubmission).
+    void beginPropagationStamping(const RNS::Bytes& transientId, int targetCost);
+
+    int _stampCostCeiling = 12;
+    StampConfirmCallback _stampConfirmCb;
+    std::set<std::string> _stampAwaitingConfirm;      // peerHex currently showing a confirm prompt
+    std::set<std::string> _stampApprovedOverCeiling;   // peerHex the user said "yes" to this session
+
+    TaskHandle_t _stampTask = nullptr;
+    QueueHandle_t _stampRequestQueue = nullptr;  // depth 1 -- one job in flight
+    QueueHandle_t _stampResultQueue = nullptr;   // depth 1
+    bool _stampInFlight = false;
+    StampPurpose _stampPurpose = StampPurpose::DIRECT;
+
+    // ── Propagation node fallback/sync ───────────────────────────────────
+    // Called once direct delivery's own retry budget is exhausted but the
+    // recipient's identity IS known (we just can't currently route to
+    // them) -- see sendDirect(). Returns true if the message is now
+    // pending via the PN (keep it queued, don't mark FAILED), false if PN
+    // fallback isn't available/applicable (caller should fail as before).
+    bool tryPropagationFallback(LXMFMessage& msg);
+    void onPropagationSubmitDone(const RNS::Bytes& recipientHash, bool delivered);
+    void onPropagationMessageDecoded(const uint8_t* data, size_t len);
+
+    PropagationClient* _propagation = nullptr;
+    RNS::Bytes _propagationNodeHash;
+    unsigned long _lastSyncAtMs = 0;
+    bool _lastSyncOk = false;
+    int _lastSyncMsgCount = 0;
 
     static LXMFManager* _instance;
 };

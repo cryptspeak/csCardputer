@@ -81,8 +81,113 @@ void SettingsScreen::buildMainMenu() {
     _list.addItem("Audio");
     _list.addItem("Time");
     _list.addItem("Security");
+    _list.addItem("Messaging");
     _list.addItem("About");
     _list.addItem("Factory Reset", Theme::ERROR);
+}
+
+// LXMF anti-spam stamps + propagation node (offline messaging) settings —
+// see docs/lxmf-stamps.md and docs/propagation-nodes.md.
+void SettingsScreen::buildMessagingMenu() {
+    _list.clear();
+    if (!_config) return;
+    auto& s = _config->settings();
+    char buf[48];
+
+    snprintf(buf, sizeof(buf), "Stamp Cost Ceiling: %d", s.stampCostCeiling);
+    _list.addItem(buf);
+
+    snprintf(buf, sizeof(buf), "Propagation Node: %s >", s.propagationNodeEnabled ? "On" : "Off");
+    _list.addItem(buf);
+
+    _list.addItem("< Back");
+}
+
+// Propagation node (offline messaging) sub-page — off by default; the
+// dependent rows (node selection, auto-sync, sync status/action) only
+// appear once the user opts in via the toggle below, so there's nothing
+// here that can be acted on without an explicit "yes" first.
+void SettingsScreen::buildPropagationMenu() {
+    _list.clear();
+    if (!_config) return;
+    auto& s = _config->settings();
+    char buf[48];
+
+    _list.addItem(s.propagationNodeEnabled ? "Use Propagation Node: ON" : "Use Propagation Node: OFF");
+
+    if (s.propagationNodeEnabled) {
+        if (s.propagationNodeHash.length() == 32) {
+            snprintf(buf, sizeof(buf), "Node: %s... >", s.propagationNodeHash.substring(0, 12).c_str());
+        } else {
+            snprintf(buf, sizeof(buf), "Node: (none) >");
+        }
+        _list.addItem(buf);
+
+        _list.addItem(s.propagationAutoSync ? "Auto-Sync: ON" : "Auto-Sync: OFF");
+
+        bool syncing = _lxmf && _lxmf->propagationSyncInFlight();
+        if (syncing) {
+            _list.addItem("Last Sync: in progress...");
+        } else if (!_lxmf || _lxmf->lastSyncAtMs() == 0) {
+            _list.addItem("Last Sync: never");
+        } else {
+            unsigned long elapsedS = (millis() - _lxmf->lastSyncAtMs()) / 1000;
+            const char* unit = "s";
+            unsigned long val = elapsedS;
+            if (elapsedS >= 3600) { val = elapsedS / 3600; unit = "h"; }
+            else if (elapsedS >= 60) { val = elapsedS / 60; unit = "m"; }
+            if (_lxmf->lastSyncOk()) {
+                snprintf(buf, sizeof(buf), "Last Sync: %lu%s ago, %d msg", val, unit, _lxmf->lastSyncMessageCount());
+            } else {
+                snprintf(buf, sizeof(buf), "Last Sync: failed, %lu%s ago", val, unit);
+            }
+            _list.addItem(buf);
+        }
+        _list.addItem(syncing ? "Syncing..." : "Sync Now");
+    }
+
+    _list.addItem("< Back");
+}
+
+// Propagation node picker — lists nodes passively discovered from
+// lxmf.propagation announces (PropagationClient::nodes(), background scan,
+// no action needed from the user to populate it) plus a manual hex-entry
+// fallback for a PN that hasn't announced within radio range yet.
+void SettingsScreen::buildPNSelectMenu() {
+    _list.clear();
+    if (!_config) return;
+    auto& s = _config->settings();
+    char buf[64];
+
+    if (!_propagation || _propagation->nodes().empty()) {
+        _list.addItem("No nodes discovered yet");
+    } else {
+        for (auto& node : _propagation->nodes()) {
+            std::string hex = node.hash.toHex();
+            bool isCurrent = s.propagationNodeHash.equalsIgnoreCase(hex.c_str());
+            const char* mark = isCurrent ? "[x] " : "";
+            std::string label = node.name.empty() ? hex.substr(0, 12) : node.name;
+            snprintf(buf, sizeof(buf), "%s%s (%dhop, cost %d)", mark, label.c_str(), node.hops, node.stampCost);
+            _list.addItem(buf);
+        }
+    }
+
+    _list.addItem("Manual Entry...");
+    _list.addItem("Clear");
+    _list.addItem("< Back");
+}
+
+void SettingsScreen::selectPropagationNode(int index) {
+    if (!_config || !_propagation) return;
+    auto& nodes = _propagation->nodes();
+    if (index < 0 || index >= (int)nodes.size()) return;
+
+    auto& s = _config->settings();
+    s.propagationNodeHash = nodes[index].hash.toHex().c_str();
+    applyAndSave();
+    showToast("Propagation node set");
+    _subMenu = MENU_PROPAGATION;
+    buildPropagationMenu();
 }
 
 void SettingsScreen::buildTimeMenu() {
@@ -813,6 +918,32 @@ void SettingsScreen::commitEdit(const std::string& value) {
         }
         applyAndSave();
         buildAudioMenu();
+    } else if (_subMenu == MENU_MESSAGING) {
+        if (_editField == 0) {
+            int v = constrain(atoi(value.c_str()), 1, 24);
+            s.stampCostCeiling = (uint8_t)v;
+        }
+        applyAndSave();
+        buildMessagingMenu();
+    } else if (_subMenu == MENU_PROPAGATION) {
+        if (_editField == 1) {
+            String trimmed = String(value.c_str());
+            trimmed.trim();
+            bool validHex = trimmed.length() == 32;
+            for (size_t i = 0; validHex && i < trimmed.length(); i++) {
+                validHex = isxdigit((unsigned char)trimmed[i]);
+            }
+            if (trimmed.isEmpty()) {
+                s.propagationNodeHash = "";  // explicit clear
+            } else if (validHex) {
+                trimmed.toLowerCase();
+                s.propagationNodeHash = trimmed;
+            } else {
+                showToast("Need 32 hex chars or empty");
+            }
+        }
+        applyAndSave();
+        buildPropagationMenu();
     } else if (_subMenu == MENU_TIME) {
         if (_editField == 1) {
             int v = atoi(value.c_str());
@@ -894,6 +1025,10 @@ std::string SettingsScreen::getCurrentValue(SubMenu menu, int field) {
         }
     } else if (menu == MENU_AUDIO) {
         if (field == 1) { snprintf(buf, sizeof(buf), "%d", s.audioVolume); return buf; }
+    } else if (menu == MENU_MESSAGING) {
+        if (field == 0) { snprintf(buf, sizeof(buf), "%d", s.stampCostCeiling); return buf; }
+    } else if (menu == MENU_PROPAGATION) {
+        if (field == 1) { return s.propagationNodeHash.c_str(); }
     } else if (menu == MENU_THEME_CUSTOM) {
         return hexForBaseField(Theme::current(), field);
     }
@@ -912,7 +1047,8 @@ void SettingsScreen::render(M5Canvas& canvas) {
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
                              "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN", "THEME",
                              "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME", "SECURITY",
-                             "AUTO-LOCK", "RADIO CONFIG"};
+                             "AUTO-LOCK", "RADIO CONFIG", "MESSAGING", "PROPAGATION NODE",
+                             "SELECT NODE"};
     const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
@@ -1357,8 +1493,9 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                 case 4: _subMenu = MENU_AUDIO; buildAudioMenu(); break;
                 case 5: _subMenu = MENU_TIME; buildTimeMenu(); break;
                 case 6: _subMenu = MENU_SECURITY; buildSecurityMenu(); break;
-                case 7: _subMenu = MENU_ABOUT; break;
-                case 8: _confirmPending = true; _confirmAction = 0; break;
+                case 7: _subMenu = MENU_MESSAGING; buildMessagingMenu(); break;
+                case 8: _subMenu = MENU_ABOUT; break;
+                case 9: _confirmPending = true; _confirmAction = 0; break;
             }
             return true;
         }
@@ -1398,6 +1535,12 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             } else if (_subMenu == MENU_AUTOLOCK) {
                 _subMenu = MENU_SECURITY;
                 buildSecurityMenu();
+            } else if (_subMenu == MENU_PROPAGATION) {
+                _subMenu = MENU_MESSAGING;
+                buildMessagingMenu();
+            } else if (_subMenu == MENU_PN_SELECT) {
+                _subMenu = MENU_PROPAGATION;
+                buildPropagationMenu();
             } else {
                 _subMenu = MENU_MAIN;
                 buildMainMenu();
@@ -1475,6 +1618,90 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             if (_audio) _audio->setEnabled(s.audioEnabled);
             applyAndSave();
             buildAudioMenu();
+            return true;
+        }
+
+        // Messaging menu: item 0 (ceiling) falls through to the generic field
+        // editor below; item 1 opens the Propagation Node sub-page.
+        if (_subMenu == MENU_MESSAGING && sel == 1) {
+            _subMenu = MENU_PROPAGATION;
+            buildPropagationMenu();
+            return true;
+        }
+
+        // Propagation Node sub-page: item 0 is always the enable toggle;
+        // items 1..4 (node picker, auto-sync, last-sync status, sync action)
+        // only exist in the list when enabled, so they're safe to address by
+        // fixed index without re-checking the toggle here.
+        if (_subMenu == MENU_PROPAGATION) {
+            auto& s = _config->settings();
+            if (sel == 0) {
+                s.propagationNodeEnabled = !s.propagationNodeEnabled;
+                applyAndSave();
+                buildPropagationMenu();
+                return true;
+            }
+            if (sel == 1) {
+                _subMenu = MENU_PN_SELECT;
+                buildPNSelectMenu();
+                return true;
+            }
+            if (sel == 2) {
+                s.propagationAutoSync = !s.propagationAutoSync;
+                applyAndSave();
+                buildPropagationMenu();
+                return true;
+            }
+            if (sel == 3) {
+                // Last Sync status — informational only.
+                return true;
+            }
+            if (sel == 4) {
+                if (!_lxmf || s.propagationNodeHash.length() != 32) {
+                    showToast("No propagation node set");
+                } else if (_lxmf->propagationSyncInFlight()) {
+                    showToast("Sync already running");
+                } else if (_lxmf->syncPropagationNode()) {
+                    showToast("Syncing...");
+                } else {
+                    showToast("Node not reachable yet");
+                }
+                buildPropagationMenu();
+                return true;
+            }
+            return true;
+        }
+
+        // Propagation node picker: discovered nodes first, then the two
+        // fixed action rows, then Back ("< Back" itself is handled by the
+        // generic last-item check above, which returns to MENU_PROPAGATION).
+        if (_subMenu == MENU_PN_SELECT) {
+            int lastItem = _list.itemCount() - 1;
+            int clearItem = lastItem - 1;
+            int manualItem = lastItem - 2;
+            size_t nodeCount = _propagation ? _propagation->nodes().size() : 0;
+
+            if (sel == clearItem) {
+                auto& s = _config->settings();
+                s.propagationNodeHash = "";
+                applyAndSave();
+                showToast("Cleared");
+                _subMenu = MENU_PROPAGATION;
+                buildPropagationMenu();
+            } else if (sel == manualItem) {
+                auto& s = _config->settings();
+                _subMenu = MENU_PROPAGATION;
+                // Rebuild the list for the menu we're returning to *before*
+                // opening the edit field -- otherwise Esc-canceling the edit
+                // leaves this picker's stale rows on screen under
+                // MENU_PROPAGATION's row indices (this was the cause of
+                // "Manual Entry > back > tapping a stale row opens the wrong
+                // field" bug).
+                buildPropagationMenu();
+                startEditing(1, s.propagationNodeHash.c_str(), "PN hash (32 hex or empty):");
+            } else if (sel >= 0 && (size_t)sel < nodeCount) {
+                selectPropagationNode(sel);
+            }
             return true;
         }
 
@@ -1635,6 +1862,16 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
 // single nudges, ends at a fast cruise that jumps a full RGB332 bucket per
 // step. Resets the moment the key is released or swapped.
 void SettingsScreen::tick() {
+    // Sync runs in the background (link/request state machine in
+    // LXMFManager::loop()) — refresh the status row the moment it finishes
+    // rather than leaving "in progress..." stuck until the user navigates
+    // away and back.
+    if (_subMenu == MENU_PROPAGATION && _lxmf) {
+        bool inFlight = _lxmf->propagationSyncInFlight();
+        if (_syncWasInFlight && !inFlight) buildPropagationMenu();
+        _syncWasInFlight = inFlight;
+    }
+
     if (_subMenu != MENU_THEME_MIXER || !_keyboard || _mixerHeldKey == 0) {
         return;
     }
@@ -1698,6 +1935,20 @@ void SettingsScreen::applyAndSave() {
     if (_audio) {
         _audio->setEnabled(s.audioEnabled);
         _audio->setVolume(s.audioVolume);
+    }
+
+    // Apply LXMF stamp cost ceiling + preferred propagation node — both are
+    // cached inside LXMFManager (not read from UserConfig live), so edits
+    // here need an explicit push or they'd only take effect after reboot.
+    if (_lxmf) {
+        _lxmf->setStampCostCeiling(s.stampCostCeiling);
+        if (s.propagationNodeEnabled && s.propagationNodeHash.length() == 32) {
+            RNS::Bytes pnHash;
+            pnHash.assignHex(s.propagationNodeHash.c_str());
+            _lxmf->setPreferredPropagationNode(pnHash);
+        } else {
+            _lxmf->setPreferredPropagationNode(RNS::Bytes());
+        }
     }
 
 #if HAS_GPS

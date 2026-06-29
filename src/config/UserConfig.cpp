@@ -73,6 +73,13 @@ void UserConfig::sanitizeSettings() {
     _settings.manualUtcOffsetHours = constrain(_settings.manualUtcOffsetHours, -12, 14);
     _settings.autoIfaceMaxPeers = constrain(_settings.autoIfaceMaxPeers, 1, 16);
 
+    // 1 (trivial) .. 24 (multi-minute grind, see LXStamper.h) -- 0 would mean
+    // "never auto-generate," which isn't a real option here since cost>0 from
+    // a peer always means *some* stamp is required.
+    _settings.stampCostCeiling = constrain(_settings.stampCostCeiling, 1, 24);
+    _settings.propagationNodeHash.trim();
+    if (_settings.propagationNodeHash.length() != 32) _settings.propagationNodeHash = "";  // 16-byte hash, hex
+
     // Auto-lock is a fixed preset list (see SettingsScreen's kAutoLockOptions)
     // — snap anything else (corrupted config, future-removed preset) to off
     // rather than rebooting on some arbitrary leftover value.
@@ -161,6 +168,11 @@ bool UserConfig::parseJson(const String& json) {
 
     _settings.autoLockMinutes = doc["auto_lock_min"] | 0;
 
+    _settings.stampCostCeiling = doc["stamp_cost_ceiling"] | 12;
+    _settings.propagationNodeEnabled = doc["pn_enabled"] | false;
+    _settings.propagationNodeHash = doc["pn_hash"] | "";
+    _settings.propagationAutoSync = doc["pn_autosync"] | false;
+
     Serial.printf("[CONFIG] Loaded: wifi_mode=%d ssid='%s' name='%s'\n",
                   (int)_settings.wifiMode,
                   _settings.wifiSTASSID.c_str(),
@@ -215,6 +227,11 @@ String UserConfig::serializeToJson() {
     doc["display_name"] = _settings.displayName;
 
     doc["auto_lock_min"] = _settings.autoLockMinutes;
+
+    doc["stamp_cost_ceiling"] = _settings.stampCostCeiling;
+    doc["pn_enabled"] = _settings.propagationNodeEnabled;
+    doc["pn_hash"] = _settings.propagationNodeHash;
+    doc["pn_autosync"] = _settings.propagationAutoSync;
 
     String json;
     serializeJson(doc, json);
