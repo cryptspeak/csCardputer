@@ -655,7 +655,11 @@ std::vector<LXMFMessage> MessageStore::loadPendingOutgoing() const {
         std::vector<LXMFMessage> messages = loadConversation(peerHex, 200);
         for (auto& msg : messages) {
             if (msg.incoming) continue;
-            if (msg.status == LXMFStatus::QUEUED || msg.status == LXMFStatus::SENDING) {
+            // STAMPING included: any in-flight proof-of-work is lost across a
+            // reboot (it's pure in-RAM task state), so a message caught mid-
+            // stamp just restarts from QUEUED like any other interrupted send.
+            if (msg.status == LXMFStatus::QUEUED || msg.status == LXMFStatus::SENDING ||
+                msg.status == LXMFStatus::STAMPING) {
                 msg.status = LXMFStatus::QUEUED;
                 pending.push_back(msg);
             }
