@@ -102,3 +102,13 @@
 #define PHY_HEADER_LORA_SYMBOLS     8
 #define PHY_CRC_LORA_BITS           16
 #define LORA_PREAMBLE_SYMBOLS_MIN   18
+
+// Explicit-header transmission time, in symbol periods -- a fixed property
+// of the LoRa PHY's explicit header mode (the mode this driver always uses,
+// see explicitHeaderMode()), independent of payload length. Distinct from
+// PHY_HEADER_LORA_SYMBOLS above, which despite the name is a bit-count
+// constant in the unrelated airtime-estimation formula (see
+// SX1262::getAirtime()), not a symbol count. Used by SX1262::dcd() to size
+// the window a latched PREAMBLE_DET may legitimately stay up without a
+// HEADER_DET following it, before treating the latch as stale.
+#define LORA_EXPLICIT_HEADER_SYMBOLS_6X   20

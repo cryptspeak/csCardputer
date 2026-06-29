@@ -47,6 +47,7 @@ protected:
 
 private:
     void transmitNow(const RNS::Bytes& data);
+    unsigned long csmaContentionWindowMs() const;
 
     SX1262* _radio;
     bool _txPending = false;
@@ -56,6 +57,16 @@ private:
     // TX queue: buffer packets when radio is busy instead of dropping
     static constexpr int TX_QUEUE_MAX = 4;
     std::deque<RNS::Bytes> _txQueue;
+
+    // Listen-before-talk: once the channel (per SX1262::dcd()) is seen
+    // clear with packets still queued, wait out a randomized contention
+    // window before actually transmitting -- not just to be polite, but
+    // because every node that deferred while the channel was busy tends to
+    // notice it clearing at close to the same moment, so transmitting the
+    // instant it's clear just trades "collided mid-packet" for "collided
+    // immediately after." See loop().
+    bool _txBackoffPending = false;
+    unsigned long _txBackoffUntilMs = 0;
 
     // Split-packet TX state: when a packet > 254 bytes, send in two LoRa frames
     bool _splitTxPending = false;

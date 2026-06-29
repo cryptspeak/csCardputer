@@ -529,6 +529,44 @@ bool SX1262::isTxBusy() {
     return true;  // Still transmitting
 }
 
+bool SX1262::dcd() {
+    uint8_t buf[2] = {0};
+    executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
+    unsigned long now = millis();
+
+    bool headerDetected = (buf[1] & IRQ_HEADER_DET_MASK_6X) != 0;
+    bool carrierDetected = headerDetected;
+
+    if ((buf[1] & IRQ_PREAMBLE_DET_MASK_6X) != 0) {
+        carrierDetected = true;
+        if (_preambleDetectedAt == 0) _preambleDetectedAt = now;
+
+        _loraSymbolTimeMs = 1000.0f * (float)(1UL << _sf) / (float)getSignalBandwidth();
+        _loraPreambleTimeMs = (long)ceil(_preambleLength * _loraSymbolTimeMs);
+        _loraHeaderTimeMs = (long)ceil((double)LORA_EXPLICIT_HEADER_SYMBOLS_6X * _loraSymbolTimeMs);
+
+        // A preamble latched but no header followed within the time a
+        // genuine LoRa frame would take to deliver one -- this call still
+        // reports busy (a real transmission may yet complete), but treat
+        // the latch itself as stale so it doesn't read as permanently busy
+        // on every subsequent call. Proven heuristic, ported from
+        // RNode_Firmware_CE's sx126x::dcd().
+        if ((long)(now - _preambleDetectedAt) > _loraPreambleTimeMs + _loraHeaderTimeMs) {
+            _preambleDetectedAt = 0;
+            uint8_t clearMask[2] = {0x00, IRQ_PREAMBLE_DET_MASK_6X};
+            executeOpcode(OP_CLEAR_IRQ_STATUS_6X, clearMask, 2);
+            // No header ever followed, so there's no in-flight or completed
+            // packet to lose -- safe to re-arm RX so a genuine new preamble
+            // can latch cleanly instead of being shadowed by the stale one.
+            if (!headerDetected) receive();
+        }
+    } else {
+        _preambleDetectedAt = 0;
+    }
+
+    return carrierDetected;
+}
+
 size_t SX1262::write(uint8_t byte) {
     return write(&byte, 1);
 }

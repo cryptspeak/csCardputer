@@ -50,7 +50,15 @@ void LoRaInterface::send_outgoing(const RNS::Bytes& data) {
         return;
     }
 
-    if (_txPending || _splitTxPending || _splitRxPending) {
+    // Listen-before-talk: dcd() reports a LoRa preamble/header currently
+    // latched on the channel, i.e. some other node is mid-transmission.
+    // Transmitting into that is a guaranteed on-air collision -- this
+    // single-radio half-duplex link previously had no notion of "someone
+    // else is using the channel right now" at all (see SX1262.h's "no
+    // CSMA/CA" comment) and would key up regardless. Treat it exactly like
+    // the radio being locally busy: queue it, and let loop()'s contention-
+    // window drain (below) send it once the channel actually clears.
+    if (_txPending || _splitTxPending || _splitRxPending || _radio->dcd()) {
         if ((int)_txQueue.size() < TX_QUEUE_MAX) {
             _txQueue.push_back(data);
             if (_splitRxPending) {
@@ -68,6 +76,20 @@ void LoRaInterface::send_outgoing(const RNS::Bytes& data) {
     }
 
     transmitNow(data);
+}
+
+// A handful of random symbol-time slots, bounded the same way RNode's CSMA
+// implementation bounds its slot time (CSMA_SLOT_MIN_MS/CSMA_SLOT_MAX_MS) --
+// short enough not to add noticeable latency at typical SF/BW settings,
+// long enough that two nodes which both deferred for the same busy channel
+// don't pick the same instant to retry once it clears.
+unsigned long LoRaInterface::csmaContentionWindowMs() const {
+    float symbolTimeMs = 1000.0f * (float)(1UL << _radio->getSpreadingFactor())
+                          / (float)_radio->getSignalBandwidth();
+    float slotMs = symbolTimeMs * 12.0f;  // CSMA_SLOT_SYMBOLS, RNode convention
+    if (slotMs < 24.0f) slotMs = 24.0f;    // CSMA_SLOT_MIN_MS
+    if (slotMs > 100.0f) slotMs = 100.0f;  // CSMA_SLOT_MAX_MS
+    return (unsigned long)(slotMs * (float)random(1, 8));
 }
 
 void LoRaInterface::transmitNow(const RNS::Bytes& data) {
@@ -156,13 +178,13 @@ void LoRaInterface::loop() {
                 _txRetried = false;
                 _txData = RNS::Bytes();
 
-                if (!_txQueue.empty()) {
-                    RNS::Bytes next = _txQueue.front();
-                    _txQueue.pop_front();
-                    transmitNow(next);
-                } else {
-                    _radio->receive();
-                }
+                // Re-arm RX unconditionally -- a queued packet goes out via
+                // the DCD/contention-window drain further down in loop(),
+                // on this same or the very next tick, rather than straight
+                // out of this retry path -- so it gets the same listen-
+                // before-talk treatment as any other queued send instead of
+                // skipping it.
+                _radio->receive();
                 return;
             }
             _txRetried = false;
@@ -190,27 +212,50 @@ void LoRaInterface::loop() {
 
             _txData = RNS::Bytes();
 
-            if (!_txQueue.empty()) {
-                RNS::Bytes next = _txQueue.front();
-                _txQueue.pop_front();
-                transmitNow(next);
-            } else {
-                _radio->receive();
-            }
+            // Re-arm RX unconditionally -- see the comment on the same
+            // pattern in the TX-timeout branch above; any queued packet
+            // goes out via the DCD/contention-window drain below, not
+            // immediately here.
+            _radio->receive();
         }
         return;
     }
 
-    // Split RX timeout: discard stale partial packets and drain deferred TX
+    // Split RX timeout: discard stale partial packets. Any queued TX picks
+    // itself up via the DCD/contention-window drain below now that
+    // _splitRxPending is clear, rather than going out immediately here.
     if (_splitRxPending && (millis() - _splitRxTimestamp > SPLIT_RX_TIMEOUT_MS)) {
         Serial.println("[LORA_IF] RX SPLIT timeout, discarding partial");
         _splitRxPending = false;
         _splitRxBuffer = RNS::Bytes();
-        if (!_txQueue.empty() && !_txPending) {
-            RNS::Bytes next = _txQueue.front();
-            _txQueue.pop_front();
-            transmitNow(next);
-            return;
+    }
+
+    // Drain the TX queue once the channel clears. Items can land here
+    // purely because dcd() reported the channel busy at send_outgoing()
+    // time (see there) -- unlike a TX-done or split-RX-done event, there's
+    // no IRQ for "carrier no longer detected", so this poll (run every
+    // loop() tick, i.e. _txPending is already known false at this point)
+    // is what notices the channel clearing and, after a randomized
+    // contention window so that every node which deferred for the same
+    // busy channel doesn't retry at the same instant, actually sends.
+    // Skipped while a packet is sitting unread in the radio so a queued
+    // send can never race a receive that's still in progress this tick.
+    if (!_txQueue.empty() && !_radio->packetAvailable) {
+        if (_radio->dcd()) {
+            _txBackoffPending = false;  // busy again -- wait for clear before re-arming a window
+        } else if (!_txBackoffPending) {
+            _txBackoffPending = true;
+            _txBackoffUntilMs = millis() + csmaContentionWindowMs();
+        } else if (millis() >= _txBackoffUntilMs) {
+            _txBackoffPending = false;
+            if (!_radio->dcd()) {  // re-check -- still clear after the wait
+                RNS::Bytes next = _txQueue.front();
+                _txQueue.pop_front();
+                transmitNow(next);
+                return;
+            }
+            // else: someone else took the channel during the wait -- the
+            // dcd()-busy branch above picks this back up next tick.
         }
     }
 
@@ -285,13 +330,10 @@ void LoRaInterface::loop() {
             InterfaceImpl::handle_incoming(_splitRxBuffer);
             _splitRxBuffer = RNS::Bytes();
 
-            if (!_txQueue.empty() && !_txPending) {
-                RNS::Bytes next = _txQueue.front();
-                _txQueue.pop_front();
-                transmitNow(next);
-            } else if (!_txPending) {
-                _radio->receive();
-            }
+            // Re-arm RX unconditionally -- as elsewhere, a queued packet
+            // goes out via the DCD/contention-window drain further down in
+            // loop(), not immediately here.
+            if (!_txPending) _radio->receive();
             return;
         } else {
             Serial.printf("[LORA_IF] RX SPLIT new seq (had 0x%02X, got 0x%02X), previous frame 2 lost\n",

@@ -4,7 +4,13 @@
 // SX1262 LoRa Radio Driver
 // Extracted from RNode_Firmware_CE (MIT License)
 // Original: Copyright (c) Sandeep Mistry, modifications by Mark Qvist & Jacob Eva
-// Simplified for Standalone mode: single-interface, no CSMA/CA, no sx127x/sx128x
+// Simplified for Standalone mode: single-interface, no sx127x/sx128x.
+// dcd() ports RNode_Firmware_CE's carrier-detect heuristic so LoRaInterface
+// can do basic listen-before-talk -- see there for the rest of the
+// collision-avoidance picture (this driver doesn't carry over RNode's full
+// multi-band adaptive CSMA congestion-window logic, which exists for a
+// shared-infrastructure RNode being hit by many independent clients, not as
+// critical for this single-app device).
 // =============================================================================
 
 #include <Arduino.h>
@@ -26,6 +32,13 @@ public:
     int  beginPacket(int implicitHeader = 0);
     int  endPacket(bool async = false);
     bool isTxBusy();
+    // Data Carrier Detect: true if the modem currently has a LoRa preamble
+    // or header latched on the channel -- i.e. someone else is mid-
+    // transmission right now. Ported from RNode_Firmware_CE's sx126x::dcd(),
+    // which this driver's framing/timing fields (_preambleDetectedAt etc.,
+    // see below) were already carried over for but never wired up to
+    // anything -- see LoRaInterface for the listen-before-talk use.
+    bool dcd();
     // Valid only in the call immediately after isTxBusy() returns false:
     // true if the async TX ended via timeout rather than IRQ_TX_DONE.
     bool lastTxFailed() const { return _lastTxFailed; }
