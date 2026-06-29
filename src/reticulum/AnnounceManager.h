@@ -7,6 +7,7 @@
 #include <string>
 #include <map>
 #include <unordered_map>
+#include <functional>
 #include "config/Config.h"
 
 class SDStore;
@@ -23,6 +24,16 @@ struct DiscoveredNode {
     uint8_t hops = 0;
     unsigned long lastSeen = 0;
     bool saved = false;  // Persisted as contact
+
+    // Name of the RNS::Interface (Interface::name(), e.g. "LoRa"/"TCP Hub")
+    // this peer was last heard from directly (hops()==1, unrelayed -- see
+    // AnnounceManager::notePeerInterface()) -- not necessarily the
+    // interface Transport's path table currently has on file for them,
+    // which only tracks the single lowest-hop route and has no notion of
+    // "which interface this conversation is actually on". Persisted for
+    // saved contacts so a reply still prefers the right radio after a
+    // reboot, before any fresh announce has been heard.
+    std::string preferredInterfaceName;
 };
 
 class AnnounceManager : public RNS::AnnounceHandler {
@@ -76,12 +87,27 @@ public:
     // same pattern NodesScreen already uses for nodeCount().
     uint32_t nameVersion() const { return _nameVersion; }
 
+    // Fired whenever a name change bumps nameVersion() above -- lets
+    // main.cpp push a UIManager::markContentDirty() so a screen idling
+    // on-screen (UIManager::render() otherwise skips redraws entirely when
+    // no dirty flag is set) actually picks the new name up instead of
+    // waiting on the next unrelated dirty flag or a tab switch.
+    using NameChangedCallback = std::function<void()>;
+    void setOnNameChanged(NameChangedCallback cb) { _onNameChanged = cb; }
+
     // Find node by hash
     const DiscoveredNode* findNode(const RNS::Bytes& hash) const;
     const DiscoveredNode* findNodeByHex(const std::string& hexHash) const;
 
     // Manual contact add
     void addManualContact(const std::string& hexHash, const std::string& name);
+
+    // Records which interface a peer was last heard from directly on (see
+    // DiscoveredNode::preferredInterfaceName). Creates a lightweight,
+    // unsaved node entry if this hash isn't known yet -- same as a passive
+    // announce would -- so stickiness still works for peers messaging us
+    // before they've ever announced.
+    void notePeerInterface(const RNS::Bytes& hash, const std::string& interfaceName);
 
     // Save/unsave a discovered node as contact by hex hash
     void saveNode(const std::string& hexHash);
@@ -98,6 +124,7 @@ public:
 private:
     void saveContact(const DiscoveredNode& node);
     void removeContact(const std::string& hexHash);
+    void bumpNameVersion() { _nameVersion++; if (_onNameChanged) _onNameChanged(); }
 
     std::vector<DiscoveredNode> _nodes;
     std::unordered_map<std::string, int> _hashIndex;  // raw hash bytes → _nodes index
@@ -115,6 +142,7 @@ private:
     bool _contactsDirty = false;
     bool _nameCacheDirty = false;
     uint32_t _nameVersion = 0;
+    NameChangedCallback _onNameChanged;
     unsigned long _lastContactSave = 0;
     unsigned long _lastNameCacheSave = 0;
     std::map<std::string, std::string> _nameCache;  // hexHash → displayName

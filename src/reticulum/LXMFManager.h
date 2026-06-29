@@ -17,6 +17,8 @@
 #include <set>
 #include <map>
 
+class AnnounceManager;
+
 class LXMFManager {
 public:
     using MessageCallback = std::function<void(const LXMFMessage&)>;
@@ -83,6 +85,10 @@ public:
     // first, every time -- this is only consulted once direct delivery's
     // own retry budget is exhausted (see sendDirect()).
     void setPropagationClient(PropagationClient* pc);
+
+    // For per-peer interface stickiness in sendDirect() (see there) --
+    // externally owned, same lifetime/wiring pattern as setPropagationClient().
+    void setAnnounceManager(AnnounceManager* am) { _announceManager = am; }
     // Empty hash (default) disables PN fallback -- messages just FAIL
     // when direct delivery can't reach the peer, same as before this
     // feature existed.
@@ -103,6 +109,7 @@ public:
 private:
     bool sendDirect(LXMFMessage& msg);
     bool ensureOutboundLink(const RNS::Destination& dest, const RNS::Bytes& destHash, const char* reason);
+    static RNS::Interface findInterfaceByName(const std::string& name);
     void processIncoming(const uint8_t* data, size_t len, const RNS::Bytes& destHash);
     void rememberMessageId(const std::string& msgIdHex);
 
@@ -140,9 +147,16 @@ private:
     std::vector<LXMFMessage> _incomingQueue;
     static constexpr int MAX_INCOMING_QUEUE = 8;
 
-    // Throttles the path-refresh request_path() calls in onPacketReceived()
-    // (see there) to once per sender per 10s, keyed by source hash hex.
-    std::map<std::string, unsigned long> _lastPathRefresh;
+    // Per-peer interface stickiness (see AnnounceManager::preferredInterfaceName
+    // and the check near the top of sendDirect()). Tracks, per destination
+    // hex, when we first noticed Transport's path table disagreed with the
+    // peer's recorded preferred interface and asked it to recheck -- bounds
+    // how long a send waits for that correction before giving up and using
+    // whatever the table says. Cheap, arbitrary cap (matches the old
+    // _lastPathRefresh pattern this replaces); this is a throttle/wait
+    // window, not a record that needs to survive eviction.
+    std::map<std::string, unsigned long> _interfaceCorrectionStart;
+    AnnounceManager* _announceManager = nullptr;
 
     struct PendingProof {
         std::string peerHex;

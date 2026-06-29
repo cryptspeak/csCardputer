@@ -1,4 +1,5 @@
 #include "LXMFManager.h"
+#include "AnnounceManager.h"
 #include "config/Config.h"
 #include <Transport.h>
 #include <time.h>
@@ -10,6 +11,17 @@ std::map<std::string, LXMFManager::PendingProof> LXMFManager::_pendingProofs;
 
 namespace {
 constexpr unsigned long LXMF_DISCOVERY_RETRY_INTERVAL_MS = 10000;
+// How long sendDirect() will hold a message once it notices Transport's
+// path table disagrees with the peer's recorded preferred interface (see
+// AnnounceManager::preferredInterfaceName), while an interface-scoped
+// request_path() correction is in flight. Short on purpose -- this is a
+// local re-check ("does this specific interface still have a route to this
+// destination"), not a full discovery search, so it shouldn't share
+// LXMF_DISCOVERY_RETRY_INTERVAL_MS's much longer multi-hop budget. If the
+// correction doesn't land in time, the message goes out on whatever the
+// table says rather than blocking indefinitely on a route that may no
+// longer exist.
+constexpr unsigned long LXMF_INTERFACE_CORRECTION_WINDOW_MS = 3000;
 // Immediate attempt + N-1 10s retries. A flat 60s (the old budget of 7) is
 // only enough for a peer within direct earshot to answer. Behind a transport
 // node -- e.g. a multi-interface LoRa gateway bridging to the internet --
@@ -166,13 +178,14 @@ void LXMFManager::loop() {
 
         LXMFMessage& msg = *it;
 
-        if (msg.retries > 0 && (millis() - msg.lastRetryMs) < LXMF_DISCOVERY_RETRY_INTERVAL_MS) {
-            ++it;
-            continue;
-        }
-
-        msg.lastRetryMs = millis();
-
+        // sendDirect() is always attempted (this loop already only runs at
+        // 10Hz, see main.cpp's lxmf.loop() throttle) -- it does its own
+        // internal throttling of the actual network-visible retry actions
+        // (request_path()/ensureOutboundLink(), gated on msg.lastRetryMs)
+        // so that a path/identity/link that becomes ready between scheduled
+        // retries is picked up on the very next 100ms tick instead of
+        // sitting unused until the next LXMF_DISCOVERY_RETRY_INTERVAL_MS
+        // boundary.
         if (sendDirect(msg)) {
             processed++;
             Serial.printf("[LXMF] Queue drain: status=%s dest=%s\n",
@@ -267,6 +280,13 @@ bool LXMFManager::ensureOutboundLink(const RNS::Destination& dest, const RNS::By
     return false;
 }
 
+RNS::Interface LXMFManager::findInterfaceByName(const std::string& name) {
+    for (auto& [hash, iface] : RNS::Transport::get_interfaces()) {
+        if (iface.name() == name) return iface;
+    }
+    return {RNS::Type::NONE};
+}
+
 bool LXMFManager::sendDirect(LXMFMessage& msg) {
     // A direct-delivery stamp grind, or a full propagation-node handoff
     // (stamp + link + send, see tryPropagationFallback()), is already in
@@ -277,11 +297,6 @@ bool LXMFManager::sendDirect(LXMFMessage& msg) {
     // retry path uniformly (PN handoff can be triggered from more than
     // one of them).
     if (msg.status == LXMFStatus::STAMPING) return false;
-
-    Serial.printf("[LXMF] sendDirect: dest=%s link=%s pending=%s\n",
-        msg.destHash.toHex().substr(0, 12).c_str(),
-        _outLink ? (_outLink.status() == RNS::Type::Link::ACTIVE ? "ACTIVE" : "INACTIVE") : "NONE",
-        _outLinkPending ? "yes" : "no");
 
     // Reset stale link-pending state
     if (_outLinkPending) {
@@ -301,44 +316,102 @@ bool LXMFManager::sendDirect(LXMFMessage& msg) {
 
     RNS::Identity recipientId = RNS::Identity::recall(msg.destHash);
     if (!recipientId) {
-        msg.retries++;
-        RNS::Transport::request_path(msg.destHash);
-        Serial.printf("[LXMF] Requesting path/identity for %s (attempt %d/%d)\n",
-                      msg.destHash.toHex().substr(0, 8).c_str(),
-                      msg.retries, LXMF_DISCOVERY_MAX_ATTEMPTS);
-        if (msg.retries >= LXMF_DISCOVERY_MAX_ATTEMPTS) {
-            Serial.printf("[LXMF] No identity/path for %s after ~60s — FAILED\n",
-                          msg.destHash.toHex().substr(0, 8).c_str());
-            msg.status = LXMFStatus::FAILED;
-            return true;
+        // Re-issuing request_path() is throttled to once per
+        // LXMF_DISCOVERY_RETRY_INTERVAL_MS (we don't want to flood the
+        // radio every 100ms while waiting) but the !recipientId check
+        // itself runs every call, so identity recall succeeding between
+        // throttled attempts is picked up on the very next tick.
+        unsigned long nowMs = millis();
+        if (msg.retries == 0 || (nowMs - msg.lastRetryMs) >= LXMF_DISCOVERY_RETRY_INTERVAL_MS) {
+            msg.retries++;
+            msg.lastRetryMs = nowMs;
+            RNS::Transport::request_path(msg.destHash);
+            Serial.printf("[LXMF] Requesting path/identity for %s (attempt %d/%d)\n",
+                          msg.destHash.toHex().substr(0, 8).c_str(),
+                          msg.retries, LXMF_DISCOVERY_MAX_ATTEMPTS);
+            if (msg.retries >= LXMF_DISCOVERY_MAX_ATTEMPTS) {
+                Serial.printf("[LXMF] No identity/path for %s after ~%lus — FAILED\n",
+                              msg.destHash.toHex().substr(0, 8).c_str(),
+                              (unsigned long)LXMF_DISCOVERY_MAX_ATTEMPTS * LXMF_DISCOVERY_RETRY_INTERVAL_MS / 1000UL);
+                msg.status = LXMFStatus::FAILED;
+                return true;
+            }
         }
         return false;
     }
 
-    Serial.printf("[LXMF] recall OK: identity for %s\n",
-                  msg.destHash.toHex().substr(0, 8).c_str());
-
     // Ensure path exists — without a path, Transport::outbound() broadcasts as
     // Header1 which the Python hub silently drops
     if (!RNS::Transport::has_path(msg.destHash)) {
-        msg.retries++;
-        Serial.printf("[LXMF] No path for %s, requesting (attempt %d/%d)\n",
-                      msg.destHash.toHex().substr(0, 8).c_str(),
-                      msg.retries, LXMF_DISCOVERY_MAX_ATTEMPTS);
-        RNS::Transport::request_path(msg.destHash);
-        if (msg.retries >= LXMF_DISCOVERY_MAX_ATTEMPTS) {
-            if (tryPropagationFallback(msg)) return false;
-            Serial.printf("[LXMF] No path for %s after ~60s — FAILED\n",
-                          msg.destHash.toHex().substr(0, 8).c_str());
-            msg.status = LXMFStatus::FAILED;
-            return true;
+        // Same throttle pattern as the identity check above: has_path() is
+        // polled every call (so a path arriving moments after the last
+        // request is sent gets used on the next ~100ms tick, not after a
+        // full LXMF_DISCOVERY_RETRY_INTERVAL_MS wait), only the actual
+        // request_path() transmission is rate-limited.
+        unsigned long nowMs = millis();
+        if (msg.retries == 0 || (nowMs - msg.lastRetryMs) >= LXMF_DISCOVERY_RETRY_INTERVAL_MS) {
+            msg.retries++;
+            msg.lastRetryMs = nowMs;
+            Serial.printf("[LXMF] No path for %s, requesting (attempt %d/%d)\n",
+                          msg.destHash.toHex().substr(0, 8).c_str(),
+                          msg.retries, LXMF_DISCOVERY_MAX_ATTEMPTS);
+            RNS::Transport::request_path(msg.destHash);
+            if (msg.retries >= LXMF_DISCOVERY_MAX_ATTEMPTS) {
+                if (tryPropagationFallback(msg)) return false;
+                Serial.printf("[LXMF] No path for %s after ~%lus — FAILED\n",
+                              msg.destHash.toHex().substr(0, 8).c_str(),
+                              (unsigned long)LXMF_DISCOVERY_MAX_ATTEMPTS * LXMF_DISCOVERY_RETRY_INTERVAL_MS / 1000UL);
+                msg.status = LXMFStatus::FAILED;
+                return true;
+            }
         }
         return false;  // keep in queue, retry later
     }
 
-    Serial.printf("[LXMF] path OK: %s hops=%d\n",
-                  msg.destHash.toHex().substr(0, 8).c_str(),
-                  RNS::Transport::hops_to(msg.destHash));
+    // Interface stickiness: Transport's path table holds exactly one route
+    // per destination (lowest hops wins, ties by announce recency) -- it
+    // has no notion of "the interface this peer actually talks to us on",
+    // so e.g. a TCP hub also bridging this same LoRa peer's announces can
+    // silently steal the route. AnnounceManager remembers which interface
+    // we last received a genuine, unrelayed packet from this peer on (see
+    // notePeerInterface(), called from onPacketReceived()) and persists it
+    // across reboots. If that disagrees with what Transport currently has
+    // on file, ask it to recheck specifically on that interface and give
+    // the correction a short, bounded window to land before sending on
+    // whatever the table says now -- rather than racing a one-shot nudge
+    // against the send, or trusting the table unconditionally.
+    {
+        std::string key = msg.destHash.toHex();
+        const DiscoveredNode* node = _announceManager ? _announceManager->findNode(msg.destHash) : nullptr;
+        RNS::Interface preferred = (node && !node->preferredInterfaceName.empty())
+            ? findInterfaceByName(node->preferredInterfaceName) : RNS::Interface{RNS::Type::NONE};
+        RNS::Interface current = RNS::Transport::next_hop_interface(msg.destHash);
+        if (preferred && (!current || current.name() != preferred.name())) {
+            unsigned long nowMs = millis();
+            auto it = _interfaceCorrectionStart.find(key);
+            if (it == _interfaceCorrectionStart.end()) {
+                _interfaceCorrectionStart[key] = nowMs;
+                Serial.printf("[LXMF] Path for %s is via %s, peer's known interface is %s -- requesting recheck\n",
+                              msg.destHash.toHex().substr(0, 8).c_str(),
+                              current ? current.name().c_str() : "(none)",
+                              preferred.name().c_str());
+                RNS::Transport::request_path(msg.destHash, preferred);
+                while (_interfaceCorrectionStart.size() > 50) {
+                    _interfaceCorrectionStart.erase(_interfaceCorrectionStart.begin());
+                }
+                return false;
+            } else if (nowMs - it->second < LXMF_INTERFACE_CORRECTION_WINDOW_MS) {
+                return false;  // still waiting on the recheck
+            } else {
+                Serial.printf("[LXMF] Interface recheck for %s timed out -- sending via %s anyway\n",
+                              msg.destHash.toHex().substr(0, 8).c_str(),
+                              current ? current.name().c_str() : "(none)");
+                _interfaceCorrectionStart.erase(it);
+            }
+        } else {
+            _interfaceCorrectionStart.erase(key);
+        }
+    }
 
     // Stamp gating: some recipients require a proof-of-work stamp before
     // they'll accept a message (see LXStamper.h). Looked up fresh from
@@ -422,20 +495,28 @@ bool LXMFManager::sendDirect(LXMFMessage& msg) {
             RNS::PacketReceipt receipt = packet.send();
             if (receipt) { sent = true; registerProofTracking(receipt, msg); }
         } else {
-            // Too large for opportunistic — need link + resource transfer
-            Serial.printf("[LXMF] Message too large for opportunistic (%d bytes > MDU), needs link (retry %d)\n",
-                          (int)payloadBytes.size(), msg.retries);
-            if (msg.retries % 3 == 0 && (!_outLink || _outLinkDestHash != msg.destHash
-                || _outLink.status() != RNS::Type::Link::ACTIVE)) {
-                ensureOutboundLink(outDest, msg.destHash, "resource transfer");
-            }
-            msg.retries++;
-            if (msg.retries >= 30) {
-                if (tryPropagationFallback(msg)) return false;
-                Serial.printf("[LXMF] Link for %s not established after %d retries — FAILED\n",
-                              msg.destHash.toHex().substr(0, 8).c_str(), msg.retries);
-                msg.status = LXMFStatus::FAILED;
-                return true;
+            // Too large for opportunistic — need link + resource transfer.
+            // The link-ACTIVE check near the top of this function already
+            // runs every call, so once ensureOutboundLink() below succeeds
+            // the actual send happens on the very next tick; only the
+            // (re-)establish attempt itself is throttled here.
+            unsigned long nowMs = millis();
+            if (msg.retries == 0 || (nowMs - msg.lastRetryMs) >= LXMF_DISCOVERY_RETRY_INTERVAL_MS) {
+                msg.lastRetryMs = nowMs;
+                Serial.printf("[LXMF] Message too large for opportunistic (%d bytes > MDU), needs link (retry %d)\n",
+                              (int)payloadBytes.size(), msg.retries);
+                if (msg.retries % 3 == 0 && (!_outLink || _outLinkDestHash != msg.destHash
+                    || _outLink.status() != RNS::Type::Link::ACTIVE)) {
+                    ensureOutboundLink(outDest, msg.destHash, "resource transfer");
+                }
+                msg.retries++;
+                if (msg.retries >= 30) {
+                    if (tryPropagationFallback(msg)) return false;
+                    Serial.printf("[LXMF] Link for %s not established after %d retries — FAILED\n",
+                                  msg.destHash.toHex().substr(0, 8).c_str(), msg.retries);
+                    msg.status = LXMFStatus::FAILED;
+                    return true;
+                }
             }
             return false;  // Keep in queue, retry when link is established
         }
@@ -474,39 +555,19 @@ void LXMFManager::onPacketReceived(const RNS::Bytes& data, const RNS::Packet& pa
     fullData.insert(fullData.end(), data.data(), data.data() + data.size());
     _instance->processIncoming(fullData.data(), fullData.size(), destHash);
 
-    // Reply routing (sendDirect()) goes purely off Transport's path table,
-    // which is populated/refreshed only by announces -- receiving a message
-    // never touches it. If an older announce for this sender is still on
-    // file (e.g. heard via a TCP hub that also bridges this same peer, with
-    // more hops on record), every reply keeps going out that stale route
-    // even while the sender is right here talking to us directly. Transport
-    // bumps a packet's hop count by exactly 1 on every receipt (see
+    // Record which interface this peer actually talks to us on, for the
+    // per-peer interface stickiness check in sendDirect(). Transport bumps
+    // a packet's hop count by exactly 1 on every receipt (see
     // Transport::inbound()), so hops()==1 is the strongest available signal
     // that this is genuine, unrelayed point-to-point traffic on
-    // `packet.receiving_interface()`. When the path on file disagrees,
-    // nudge a path request so the table can correct itself on its own terms
-    // (a fresh, equal-or-lower-hop announce always wins, per Transport's own
-    // replacement rule) instead of silently keeping the wrong route until
-    // the peer happens to re-announce on its own schedule.
-    if (data.size() >= 16 && packet.hops() == 1) {
+    // `packet.receiving_interface()`, as opposed to something relayed in
+    // from elsewhere. This just durably remembers that ground truth --
+    // sendDirect() is what decides whether/how to act on it, with a bounded
+    // wait instead of racing a one-shot path nudge against the reply it's
+    // meant to fix.
+    if (data.size() >= 16 && packet.hops() == 1 && packet.receiving_interface() && _instance->_announceManager) {
         RNS::Bytes sourceHash(data.data(), 16);
-        RNS::Interface known = RNS::Transport::next_hop_interface(sourceHash);
-        if (!known || known != packet.receiving_interface()) {
-            std::string key = sourceHash.toHex();
-            unsigned long now = millis();
-            auto it = _instance->_lastPathRefresh.find(key);
-            if (it == _instance->_lastPathRefresh.end() || now - it->second >= 10000UL) {
-                _instance->_lastPathRefresh[key] = now;
-                RNS::Transport::request_path(sourceHash);
-                // Unbounded over long uptime otherwise -- every distinct
-                // sender ever heard direct adds an entry that never expires
-                // on its own. Cheap, arbitrary cap; this is a throttle, not
-                // a record that needs to survive eviction.
-                while (_instance->_lastPathRefresh.size() > 50) {
-                    _instance->_lastPathRefresh.erase(_instance->_lastPathRefresh.begin());
-                }
-            }
-        }
+        _instance->_announceManager->notePeerInterface(sourceHash, packet.receiving_interface().name());
     }
 }
 

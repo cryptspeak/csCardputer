@@ -1224,9 +1224,21 @@ void setup() {
     announceManager->setStorage(&sdStore, &flash);
     announceManager->setLocalDestHash(rns.destination().hash());
     if (rns.loraInterface()) announceManager->setLoRaInterface(rns.loraInterface());
+    // lxmf.begin() ran before this existed -- wire it in now so sendDirect()
+    // can look up each peer's preferred interface (see LXMFManager.h).
+    lxmf.setAnnounceManager(announceManager);
     // Identity is loaded (see boot gate above) — wire it in before loading
     // so contact files and the name cache are decrypted/encrypted at rest.
     announceManager->setIdentity(&rns.identity());
+    // Without this, a name learned/changed via announce while MessagesScreen
+    // (or any other screen reading AnnounceManager names) is already on
+    // -screen never triggers a redraw -- UIManager::render() skips entirely
+    // when no dirty flag is set, so the nameVersion() poll those screens do
+    // in render() never actually runs until some unrelated dirty flag (e.g.
+    // the 1Hz status-bar tick, itself suppressed once the screen dims) or a
+    // tab switch (UIManager::setScreen() unconditionally markAllDirty()s)
+    // happens to fire first.
+    announceManager->setOnNameChanged([]() { ui.markContentDirty(); });
     announceManager->loadContacts();
     announceManager->loadNameCache();
     announceHandler = RNS::HAnnounceHandler(announceManager);

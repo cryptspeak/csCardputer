@@ -291,7 +291,7 @@ void AnnounceManager::received_announce(
         if (node.lastSeen != 0 && now - node.lastSeen < ANNOUNCE_MIN_INTERVAL_MS) return;
         if (!name.empty()) {
             node.name = name;
-            _nameVersion++;
+            bumpNameVersion();
             std::string destHex = destination_hash.toHex();
             _nameCache[destHex] = name;
             while ((int)_nameCache.size() > MAX_NAME_CACHE) {
@@ -353,7 +353,7 @@ void AnnounceManager::received_announce(
     if (_loraIf) { node.rssi = _loraIf->lastRxRssi(); node.snr = _loraIf->lastRxSnr(); }
     _hashIndex[key] = (int)_nodes.size();
     _nodes.push_back(node);
-    if (!name.empty()) _nameVersion++;
+    if (!name.empty()) bumpNameVersion();
     if (!name.empty()) {
         _nameCache[destHex] = name;
         while ((int)_nameCache.size() > MAX_NAME_CACHE) {
@@ -395,7 +395,7 @@ void AnnounceManager::addManualContact(const std::string& hexHash, const std::st
     auto it = _hashIndex.find(key);
     if (it != _hashIndex.end()) {
         auto& node = _nodes[it->second];
-        if (!safeName.empty()) { node.name = safeName; _nameVersion++; }
+        if (!safeName.empty()) { node.name = safeName; bumpNameVersion(); }
         node.saved = true;
         saveContact(node);
         return;
@@ -408,8 +408,34 @@ void AnnounceManager::addManualContact(const std::string& hexHash, const std::st
     node.saved = true;
     _hashIndex[key] = (int)_nodes.size();
     _nodes.push_back(node);
-    if (!safeName.empty()) _nameVersion++;
+    if (!safeName.empty()) bumpNameVersion();
     saveContact(node);
+}
+
+void AnnounceManager::notePeerInterface(const RNS::Bytes& hash, const std::string& interfaceName) {
+    if (interfaceName.empty()) return;
+    std::string key = makeKey(hash);
+    auto it = _hashIndex.find(key);
+    if (it != _hashIndex.end()) {
+        auto& node = _nodes[it->second];
+        if (node.preferredInterfaceName != interfaceName) {
+            node.preferredInterfaceName = interfaceName;
+            if (node.saved) _contactsDirty = true;
+        }
+        return;
+    }
+
+    // Not seen before (e.g. messaging us before ever announcing) -- create
+    // the same lightweight, unsaved entry a passive announce would, so
+    // stickiness still has somewhere to live for this peer.
+    if ((int)_nodes.size() >= MAX_NODES) return;  // full -- let the next announce/evictStale() make room
+    DiscoveredNode node;
+    node.hash = hash;
+    node.name = hash.toHex().substr(0, 12);
+    node.lastSeen = millis();
+    node.preferredInterfaceName = interfaceName;
+    _hashIndex[key] = (int)_nodes.size();
+    _nodes.push_back(node);
 }
 
 void AnnounceManager::saveNode(const std::string& hexHash) {
@@ -474,6 +500,7 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
     JsonDocument doc;
     doc["hash"] = hexHash;
     doc["name"] = node.name;
+    if (!node.preferredInterfaceName.empty()) doc["iface"] = node.preferredInterfaceName;
 
     String json;
     serializeJson(doc, json);
@@ -572,6 +599,7 @@ void AnnounceManager::loadContacts() {
                                 node.hash = hash;
                                 node.name = sanitizeName(doc["name"] | "");
                                 if (node.name.empty()) node.name = hexHash.substr(0, 12);
+                                node.preferredInterfaceName = doc["iface"] | "";
                                 node.rssi = 0;
                                 node.snr = 0.0f;
                                 node.hops = 0;
