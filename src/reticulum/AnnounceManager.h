@@ -140,12 +140,16 @@ private:
     const RNS::Identity* _identity = nullptr;
     RNS::Bytes _localDestHash;
     bool _contactsDirty = false;
-    bool _nameCacheDirty = false;
+    // mutable: lookupName() is logically const (it answers "what name do we
+    // currently know for this hash") but opportunistically self-heals this
+    // cache from RNS::Identity::recall_app_data() when it resolves a name
+    // these don't yet have -- see lookupName().
+    mutable bool _nameCacheDirty = false;
     uint32_t _nameVersion = 0;
     NameChangedCallback _onNameChanged;
     unsigned long _lastContactSave = 0;
     unsigned long _lastNameCacheSave = 0;
-    std::map<std::string, std::string> _nameCache;  // hexHash → displayName
+    mutable std::map<std::string, std::string> _nameCache;  // hexHash → displayName
     unsigned long _globalAnnounceWindowStart = 0;
     unsigned int _globalAnnounceCount = 0;
     static constexpr unsigned int MAX_GLOBAL_ANNOUNCES_PER_SEC = 8;

@@ -180,6 +180,42 @@ static std::string sanitizeName(const std::string& raw, size_t maxLen = 32) {
     return clean.substr(start, end - start + 1);
 }
 
+// Full extraction pipeline for a display name out of raw announce app_data:
+// MsgPack array/bare-value parsing, then a raw-UTF-8 fallback for
+// implementations that announce a bare name with no MsgPack envelope at all
+// (e.g. some Rust LXMF clients), then the character sanitizer. Shared by
+// received_announce() (app_data straight off a live announce packet) and
+// AnnounceManager::lookupName() (app_data recalled via
+// RNS::Identity::recall_app_data(), which is the same bytes, just from RNS's
+// own persisted cache instead of a packet in hand).
+static std::string extractDisplayName(const RNS::Bytes& app_data) {
+    if (app_data.size() == 0) return "";
+    std::string rawName = extractMsgPackName(app_data.data(), app_data.size());
+    if (rawName.empty()) {
+        // Use raw bytes as name if valid UTF-8 text (handles Rust raw UTF-8 announces)
+        bool isText = app_data.size() > 0 && app_data.size() <= 64;
+        const uint8_t* p = app_data.data();
+        size_t sz = app_data.size();
+        for (size_t i = 0; isText && i < sz; ) {
+            uint8_t c = p[i];
+            if (c >= 0x20 && c <= 0x7E) { i++; }             // printable ASCII
+            else if (c == 0x09) { i++; }                      // tab (ok in names)
+            else if ((c & 0xE0) == 0xC0 && i + 1 < sz &&     // 2-byte UTF-8
+                     (p[i+1] & 0xC0) == 0x80) { i += 2; }
+            else if ((c & 0xF0) == 0xE0 && i + 2 < sz &&     // 3-byte UTF-8
+                     (p[i+1] & 0xC0) == 0x80 &&
+                     (p[i+2] & 0xC0) == 0x80) { i += 3; }
+            else if ((c & 0xF8) == 0xF0 && i + 3 < sz &&     // 4-byte UTF-8
+                     (p[i+1] & 0xC0) == 0x80 &&
+                     (p[i+2] & 0xC0) == 0x80 &&
+                     (p[i+3] & 0xC0) == 0x80) { i += 4; }
+            else { isText = false; }
+        }
+        if (isText) rawName = std::string((const char*)p, sz);
+    }
+    return sanitizeName(rawName);
+}
+
 AnnounceManager::AnnounceManager(const char* aspectFilter)
     : RNS::AnnounceHandler(aspectFilter)
 {
@@ -204,38 +240,14 @@ void AnnounceManager::received_announce(
         for (size_t i = 0; i < std::min((size_t)16, app_data.size()); i++)
             Serial.printf("%02X", app_data.data()[i]);
         Serial.println();
-        std::string rawName = extractMsgPackName(app_data.data(), app_data.size());
-        if (rawName.empty()) {
-            // Use raw bytes as name if valid UTF-8 text (handles Rust raw UTF-8 announces)
-            bool isText = app_data.size() > 0 && app_data.size() <= 64;
-            const uint8_t* p = app_data.data();
-            size_t sz = app_data.size();
-            for (size_t i = 0; isText && i < sz; ) {
-                uint8_t c = p[i];
-                if (c >= 0x20 && c <= 0x7E) { i++; }             // printable ASCII
-                else if (c == 0x09) { i++; }                      // tab (ok in names)
-                else if ((c & 0xE0) == 0xC0 && i + 1 < sz &&     // 2-byte UTF-8
-                         (p[i+1] & 0xC0) == 0x80) { i += 2; }
-                else if ((c & 0xF0) == 0xE0 && i + 2 < sz &&     // 3-byte UTF-8
-                         (p[i+1] & 0xC0) == 0x80 &&
-                         (p[i+2] & 0xC0) == 0x80) { i += 3; }
-                else if ((c & 0xF8) == 0xF0 && i + 3 < sz &&     // 4-byte UTF-8
-                         (p[i+1] & 0xC0) == 0x80 &&
-                         (p[i+2] & 0xC0) == 0x80 &&
-                         (p[i+3] & 0xC0) == 0x80) { i += 4; }
-                else { isText = false; }
+        name = extractDisplayName(app_data);
+        if (name.empty()) {
+            Serial.printf("[ANNOUNCE] Unknown app_data format (%d bytes): ", (int)app_data.size());
+            for (size_t i = 0; i < std::min((size_t)32, app_data.size()); i++) {
+                Serial.printf("%02X ", app_data.data()[i]);
             }
-            if (isText) {
-                rawName = std::string((const char*)p, sz);
-            } else {
-                Serial.printf("[ANNOUNCE] Unknown app_data format (%d bytes): ", (int)app_data.size());
-                for (size_t i = 0; i < std::min((size_t)32, app_data.size()); i++) {
-                    Serial.printf("%02X ", app_data.data()[i]);
-                }
-                Serial.println();
-            }
+            Serial.println();
         }
-        name = sanitizeName(rawName);
     }
 
     // Filter out own announces
@@ -683,9 +695,42 @@ void AnnounceManager::loop() {
 }
 
 std::string AnnounceManager::lookupName(const std::string& hexHash) const {
-    // Check live nodes first
+    // Check live nodes first -- covers saved contacts (whose name is a
+    // deliberate user choice, see addManualContact()/saveNode()) and any
+    // peer already discovered this session.
     const DiscoveredNode* node = findNodeByHex(hexHash);
     if (node && !node->name.empty()) return node->name;
+
+    // RNS::Identity::recall_app_data() is the protocol's own persisted
+    // record of the last announce app_data validated for this destination --
+    // populated by Transport::inbound()/Identity::validate_announce() for
+    // *every* announce ever validated, not just the ones that happened to
+    // reach this AnnounceManager's own handler (which is filtered to the
+    // "lxmf.delivery" aspect and rate-limited; see ANNOUNCE_MIN_INTERVAL_MS
+    // and MAX_GLOBAL_ANNOUNCES_PER_SEC above). It's loaded from flash at
+    // boot (ReticulumManager::begin()) and saved periodically/on shutdown
+    // (ReticulumManager::loop()), independently of this class's own
+    // _nameCache below -- so it's there immediately after a reboot for any
+    // peer we've ever exchanged announces with, with no need to wait for a
+    // fresh one. You can't have a conversation with a peer without having
+    // validated at least one of their announces (that's how their identity
+    // key is learned), so this covers every peer with message history, not
+    // just ones explicitly saved as a contact.
+    if (hexHash.length() == RNS::Type::Reticulum::TRUNCATED_HASHLENGTH / 8 * 2) {
+        RNS::Bytes hash;
+        hash.assignHex(hexHash.c_str());
+        std::string recalled = extractDisplayName(RNS::Identity::recall_app_data(hash));
+        if (!recalled.empty()) {
+            // Self-heal the legacy encrypted name cache so it's warm even if
+            // RNS_KNOWN_DESTINATIONS_MAX culls this entry before next boot.
+            if (_nameCache[hexHash] != recalled) {
+                _nameCache[hexHash] = recalled;
+                _nameCacheDirty = true;
+            }
+            return recalled;
+        }
+    }
+
     // Fall back to cached names
     auto it = _nameCache.find(hexHash);
     if (it != _nameCache.end()) return it->second;
