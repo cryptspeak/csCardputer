@@ -3,29 +3,6 @@
 #include "config/Config.h"
 #include <algorithm>
 
-struct RadioPresetHome {
-    const char* name;
-    uint8_t sf; uint32_t bw; uint8_t cr; int8_t txPower;
-};
-static const RadioPresetHome HOME_PRESETS[] = {
-    {"Short Turbo",   7,  500000, 5,  14},
-    {"Short Fast",    7,  250000, 5,  14},
-    {"Short Slow",    8,  250000, 5,  14},
-    {"Medium Fast",   9,  250000, 5,  17},
-    {"Medium Slow",   10, 250000, 5,  17},
-    {"Long Turbo",    11, 500000, 8,  LORA_MAX_TX_POWER},
-    {"Long Fast",     11, 250000, 5,  LORA_MAX_TX_POWER},
-    {"Long Moderate", 11, 125000, 8,  LORA_MAX_TX_POWER},
-};
-static const char* detectPresetName(const UserSettings& s) {
-    for (int i = 0; i < 8; i++) {
-        if (s.loraSF == HOME_PRESETS[i].sf && s.loraBW == HOME_PRESETS[i].bw
-            && s.loraCR == HOME_PRESETS[i].cr && s.loraTxPower == HOME_PRESETS[i].txPower)
-            return HOME_PRESETS[i].name;
-    }
-    return "Custom";
-}
-
 static void drawFitted(M5Canvas& canvas, const char* text, int x, int y, int maxW) {
     if (canvas.textWidth(text) <= maxW) {
         canvas.drawString(text, x, y);
@@ -96,32 +73,26 @@ void HomeScreen::render(M5Canvas& canvas) {
     canvas.fillRoundRect(cardX + 3, cardY + 4, 3, cardH - 8, 1, Theme::PRIMARY);
 
     if (_radio && _radio->isRadioOnline()) {
-        if (_userConfig) {
-            const char* preset = detectPresetName(_userConfig->settings());
-            Theme::useUiFont(canvas);
-            canvas.setTextColor(Theme::TEXT_PRIMARY);
-            char headline[48];
-            snprintf(headline, sizeof(headline), "%s  SF%d  %luk",
-                preset,
-                _radio->getSpreadingFactor(),
-                (unsigned long)(_radio->getSignalBandwidth() / 1000));
-            drawFitted(canvas, headline, cardX + pad, cardY + headlineY, cardW - pad * 2);
-        }
+        Theme::useUiFont(canvas);
+        canvas.setTextColor(Theme::TEXT_PRIMARY);
+        char headline[48];
+        snprintf(headline, sizeof(headline), "%.3f MHz @ %lukHz",
+            _radio->getFrequency() / 1000000.0,
+            (unsigned long)(_radio->getSignalBandwidth() / 1000));
+        drawFitted(canvas, headline, cardX + pad, cardY + headlineY, cardW - pad * 2);
+
+        Theme::useSmallFont(canvas);
+        canvas.setTextColor(Theme::MUTED);
+        canvas.setCursor(cardX + pad, cardY + detailY);
+        canvas.printf("SF%d  CR:%d  TX:%d dBm  P:%d L:%d",
+            _radio->getSpreadingFactor(),
+            _radio->getCodingRate4(), _radio->getTxPower(),
+            _rns ? (int)_rns->pathCount() : 0,
+            _rns ? (int)_rns->linkCount() : 0);
     } else {
         Theme::useUiFont(canvas);
         canvas.setTextColor(Theme::MUTED);
         canvas.drawString("LoRa Offline", cardX + pad, cardY + headlineY);
-    }
-
-    if (_radio && _radio->isRadioOnline()) {
-        Theme::useSmallFont(canvas);
-        canvas.setTextColor(Theme::MUTED);
-        canvas.setCursor(cardX + pad, cardY + detailY);
-        canvas.printf("%.1f MHz  TX:%d dBm  CR:%d  P:%d L:%d",
-            _radio->getFrequency() / 1000000.0,
-            _radio->getTxPower(), _radio->getCodingRate4(),
-            _rns ? (int)_rns->pathCount() : 0,
-            _rns ? (int)_rns->linkCount() : 0);
     }
 
     y = cardY + cardH + 4;
