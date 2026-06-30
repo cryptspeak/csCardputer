@@ -103,3 +103,25 @@ second password before counting it as wrong. A match wipes the device and
 reboots — see [duress-password.md](duress-password.md) for the full
 mechanism (verifier storage, wipe scope, and why the reboot intentionally
 looks identical to a fresh device rather than showing any "wiped" state).
+
+## Known one-time side effects when migrating from upstream
+
+`UserConfig::parseJson()` reads every field as `doc["key"] | default`, so a
+config written by upstream `ratspeak/rsCardputer` (missing any key this
+fork added later) always loads cleanly instead of failing — but two fields
+fall back to a default that produces a one-time, user-visible prompt
+rather than silently carrying over prior intent:
+
+- **Timezone**: upstream's `utc_offset`/`tz_idx`/`tz_set` have no
+  equivalent in the fork's `tz_manual`/`tz_manual_offset` fields, so a
+  migrated device falls back to GPS-estimated local time
+  (`manualTimezoneEnabled = false`) instead of the old manual offset.
+- **LoRa setup wizard**: `radio_configured` doesn't exist in upstream's
+  config at all, so it defaults to `false` and the wizard
+  ([main.cpp](../src/main.cpp), gated on `radioConfigured`) runs once on
+  first boot — even though the migrated `lora_freq`/`lora_sf`/`lora_bw`/
+  `lora_cr`/`lora_txp` values are correct and preserved. Re-running the
+  wizard just re-confirms already-correct values; nothing is lost.
+
+Both are one-time prompts on the first boot after migration, not data
+loss — the user re-picks a timezone and re-confirms radio settings once.
