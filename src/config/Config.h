@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// rsCardputer Standalone — Compile-Time Configuration
+// csCardputer Standalone — Compile-Time Configuration
 // =============================================================================
 
 // Independent release line starting at 0.0.1 — no longer mirrors the
@@ -42,7 +42,7 @@
 
 // --- SD Card Paths ---
 // Legacy path kept intentionally so existing standalone users keep their data.
-// TODO: Migrate to /rscardputer only with an explicit data migration plan.
+// TODO: Migrate to /cscardputer only with an explicit data migration plan.
 #define SD_PATH_CONFIG_DIR   "/ratcom/config"
 #define SD_PATH_USER_CONFIG  "/ratcom/config/user.json"
 #define SD_PATH_THEME_CONFIG "/ratcom/config/theme.json"

@@ -96,7 +96,7 @@ void BootScreen::render(M5Canvas& canvas) {
 
     if (revealAmt > 0.0f) {
         canvas.setTextColor(Theme::lerp565(Theme::BG, Theme::SECONDARY, revealAmt));
-        const char* subtitle = "RSCARDPUTER-CE";
+        const char* subtitle = "CSCARDPUTER";
         int subW = strlen(subtitle) * Theme::CHAR_W;
         canvas.setCursor((Theme::SCREEN_W - subW) / 2, 76);
         canvas.print(subtitle);

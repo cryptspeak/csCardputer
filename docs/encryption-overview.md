@@ -1,6 +1,6 @@
 # Encryption Overview
 
-Cryptspeak, rsCardputer-CE's at-rest encryption layer, adds **mandatory at-rest encryption** for
+Cryptspeak, csCardputer's at-rest encryption layer, adds **mandatory at-rest encryption** for
 everything the firmware writes to flash, NVS, and SD card. It does not
 change anything about the Reticulum/LXMF wire protocol — packets on LoRa,
 WiFi, or TCP keep using their own protocol-level crypto, unmodified. This

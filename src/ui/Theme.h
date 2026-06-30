@@ -7,7 +7,7 @@ class FlashStore;
 class SDStore;
 
 // =============================================================================
-// rsCardputer — compact field-console theme
+// csCardputer — compact field-console theme
 //
 // Colors below are runtime-mutable (not constexpr) so a user-selected theme
 // can override them at boot, but every symbol keeps its original name and

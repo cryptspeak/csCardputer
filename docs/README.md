@@ -1,4 +1,4 @@
-# rsCardputer-CE Documentation
+# csCardputer Documentation
 
 This folder documents how the firmware works, with a focus on the at-rest
 encryption system (the "Cryptspeak" feature set) since that is the part

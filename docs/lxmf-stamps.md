@@ -1,8 +1,8 @@
 # LXMF Anti-Spam Stamps
 
 Modules: [`src/reticulum/LXStamper.{h,cpp}`](../src/reticulum/LXStamper.h),
-[`LXMFMessage.{h,cpp}`](https://github.com/0x00001312/microReticulum/blob/master/src/LXMFMessage.h)
-(in the pinned [microReticulum fork](https://github.com/0x00001312/microReticulum),
+[`LXMFMessage.{h,cpp}`](https://github.com/cryptspeak/microReticulum/blob/master/src/LXMFMessage.h)
+(in the pinned [microReticulum fork](https://github.com/cryptspeak/microReticulum),
 not this repo — see `platformio.ini`'s `lib_deps`),
 [`src/reticulum/LXMFManager.cpp`](../src/reticulum/LXMFManager.cpp) (stamp
 gating in `sendDirect()`, the background stamp task, `confirmStamping()`)
@@ -17,7 +17,7 @@ Sideband and NomadNet) silently dropped this device's messages.
 
 `LXMFMessage`'s packed content is `[timestamp, title, content, fields]`
 as a 4-element msgpack array (`packContent()`,
-[LXMFMessage.cpp:92](https://github.com/0x00001312/microReticulum/blob/master/src/LXMFMessage.cpp)).
+[LXMFMessage.cpp:92](https://github.com/cryptspeak/microReticulum/blob/master/src/LXMFMessage.cpp)).
 `fields` is always emitted as an empty fixmap (`0x80`) — real per-field
 support (e.g. `FIELD_TICKET`) wasn't needed for stamps and stays a
 non-goal for now.

@@ -27,7 +27,7 @@ class StubServerCallbacks : public BLEServerCallbacks {
 };
 
 bool BLEStub::begin() {
-    BLEDevice::init("rsCardputer");
+    BLEDevice::init("csCardputer");
     bleServer = BLEDevice::createServer();
     bleServer->setCallbacks(new StubServerCallbacks());
 
@@ -39,7 +39,7 @@ bool BLEStub::begin() {
         RSCARDPUTER_RX_CHAR_UUID,
         BLECharacteristic::PROPERTY_WRITE
     );
-    rxChar->setValue("rsCardputer v" RSCARDPUTER_VERSION_STRING " - BLE stub");
+    rxChar->setValue("csCardputer v" RSCARDPUTER_VERSION_STRING " - BLE stub");
 
     // TX characteristic (notify to client)
     txChar = service->createCharacteristic(

@@ -4,8 +4,8 @@ Module: [`src/reticulum/ReticulumManager.{h,cpp}`](../src/reticulum/ReticulumMan
 
 This is the layer between the firmware and
 [microReticulum](https://github.com/ratspeak/microReticulum) (a fork),
-pinned to a specific commit of a personal fork of that fork
-([0x00001312/microReticulum](https://github.com/0x00001312/microReticulum))
+pinned to a specific commit of our own fork of that fork
+([cryptspeak/microReticulum](https://github.com/cryptspeak/microReticulum))
 in `platformio.ini`'s `lib_deps` — not vendored in this repo.
 `ReticulumManager` owns the `RNS::Reticulum`
 instance, the `RNS::Identity`, the LXMF delivery `RNS::Destination`, and

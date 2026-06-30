@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// rsCardputer — M5Stack Cardputer Adv + Cap LoRa-1262 Pin Definitions
+// csCardputer — M5Stack Cardputer Adv + Cap LoRa-1262 Pin Definitions
 // =============================================================================
 
 // --- SX1262 LoRa Radio (external SPI bus — FSPI/SPI2) ---

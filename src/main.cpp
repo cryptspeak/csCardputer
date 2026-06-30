@@ -1,5 +1,5 @@
 // =============================================================================
-// rsCardputer Standalone — Main Entry Point
+// csCardputer Standalone — Main Entry Point
 // C1-C7: Radio, Keyboard, Display, Reticulum, Nodes, WiFi, LXMF
 // =============================================================================
 
@@ -973,7 +973,7 @@ void setup() {
 
     Serial.println();
     Serial.println("=================================");
-    Serial.printf("  rsCardputer Standalone v%s\n", RSCARDPUTER_VERSION_STRING);
+    Serial.printf("  csCardputer Standalone v%s\n", RSCARDPUTER_VERSION_STRING);
     Serial.println("  M5Stack Cardputer Adv");
     Serial.println("=================================");
 
@@ -1563,7 +1563,7 @@ void setup() {
     lastStatusUpdate = now;
     loopCycleStart = now;
 
-    Serial.println("[BOOT] rsCardputer Standalone ready");
+    Serial.println("[BOOT] csCardputer Standalone ready");
 }
 
 // =============================================================================

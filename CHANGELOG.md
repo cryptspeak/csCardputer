@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Cryptspeak (rsCardputer-CE) are documented here.
+All notable changes to Cryptspeak (csCardputer) are documented here.
 Versioning is independent of upstream
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) — see
 `docs/firmware-architecture.md`.
@@ -73,7 +73,7 @@ Versioning is independent of upstream
   numerically smallest instead of the actually-oldest ones. Under
   sustained traffic this silently undermined duplicate detection. Now
   tracks real insertion order separately
-  (`0x00001312/microReticulum@3481921`).
+  (`cryptspeak/microReticulum@3481921`).
 - **Routing:** routing and reply targets broke across every reboot —
   the message store was initialized before the identity was loaded, and
   saved conversation directories were keyed by a truncated hash too
@@ -165,7 +165,7 @@ Versioning is independent of upstream
   re-runs LoRa region/frequency setup via the new `RadioSetupScreen`
   instead of inheriting it from a timezone pick.
 
-Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.5...v0.1.0
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.0.5...v0.1.0
 
 ## v0.0.5 — Radio Frequency Fix
 
@@ -193,7 +193,7 @@ Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.5...v0.1.0
   call, since `CalibrateImage` has the same BUSY-assertion-propagation
   gap.
 
-Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.4...v0.0.5
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.0.4...v0.0.5
 
 ## v0.0.4 — Boot Branding, Radio & Transport Fixes
 
@@ -268,7 +268,7 @@ Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.4...v0.0.5
   `make package` now produces `dist/rscardputer-standalone.zip`
   end to end.
 
-Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.3...v0.0.4
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.0.3...v0.0.4
 
 ## v0.0.3 — Custom Color Themes
 
@@ -299,11 +299,11 @@ Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.3...v0.0.4
   they actually control rather than abstract design-system terms:
   Background, Text, Subtext, Highlight, Header, Warning, Error.
 
-Full diff: https://github.com/0x00001312/rsCardputer-CE/compare/v0.0.2...v0.0.3
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.0.2...v0.0.3
 
 ## v0.0.2
 
-- Added the [Web Flasher](https://0x00001312.github.io/CryptspeakFlasher/)
+- Added the [Web Flasher](https://cryptspeak.github.io/webFlasher/)
   as the recommended way to flash release builds — no local PlatformIO
   toolchain needed.
 
@@ -322,4 +322,4 @@ ratspeak/rsCardputer's numbering and the old `-CE` tag suffix.
   `rsCardputer-CE` kept as the underlying codebase name.
 - RNode: hardened SX1262 host-reconnect handling.
 
-Full release notes: https://github.com/0x00001312/rsCardputer-CE/releases/tag/v0.0.1
+Full release notes: https://github.com/cryptspeak/csCardputer/releases/tag/v0.0.1

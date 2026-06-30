@@ -13,10 +13,10 @@ void DataCleanScreen::render(M5Canvas& canvas) {
     canvas.setCursor(cx - tw / 2, Theme::CONTENT_Y + 4);
     canvas.print(titleStr);
 
-    // "rsCardputer-CE" subtitle
+    // "csCardputer" subtitle
     canvas.setTextSize(1);
     canvas.setTextColor(Theme::MUTED);
-    const char* sub = "rsCardputer-CE";
+    const char* sub = "csCardputer";
     int sw = strlen(sub) * Theme::CHAR_W;
     canvas.setCursor(cx - sw / 2, Theme::CONTENT_Y + 24);
     canvas.print(sub);

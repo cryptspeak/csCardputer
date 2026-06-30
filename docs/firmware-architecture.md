@@ -1,6 +1,6 @@
 # Firmware Architecture
 
-rsCardputer-CE is a PlatformIO/Arduino firmware for the M5Stack Cardputer
+csCardputer is a PlatformIO/Arduino firmware for the M5Stack Cardputer
 Adv (ESP32-S3). It's a single standalone image — there's no host-side
 companion app; everything runs on-device. `src/main.cpp` is the entry
 point (`setup()`/`loop()`), wiring together the modules below.

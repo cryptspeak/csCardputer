@@ -2,22 +2,22 @@
 
 # Cryptspeak
 
-**rsCardputer-CE — standalone Reticulum/LXMF firmware for the M5Stack Cardputer Adv, with at-rest encryption for your identity, messages, contacts, and settings.**
+**csCardputer — standalone Reticulum/LXMF firmware for the M5Stack Cardputer Adv, with at-rest encryption for your identity, messages, contacts, and settings.**
 
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#status)
 [![Model](https://img.shields.io/badge/model-Cardputer%20Adv-success.svg)](https://docs.m5stack.com/en/core/Cardputer-Adv)
 [![Encryption](https://img.shields.io/badge/at--rest-AES--256--CTR%20%2B%20HMAC-success.svg)](#cryptspeak--what-changed)
 [![License](https://img.shields.io/badge/license-mixed-blue.svg)](#credits--license)
 
-[Web Flasher](https://0x00001312.github.io/CryptspeakFlasher/) |
+[Web Flasher](https://cryptspeak.github.io/webFlasher/) |
 [Ratspeak](https://github.com/ratspeak/Ratspeak)
 
 </div>
 
 ---
 
-Cryptspeak (rsCardputer-CE) is a standalone Reticulum/LXMF firmware
-image for the M5Stack Cardputer Adv, built on top of
+Cryptspeak (csCardputer) is a standalone Reticulum/LXMF firmware
+image for the M5Stack Cardputer Adv, built as a fork of
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) with
 mandatory at-rest encryption added on top. This repository currently
 builds only the standalone image.
@@ -213,7 +213,7 @@ The supported Cardputer Adv has:
 ## Flashing
 
 This repository builds only the standalone firmware. The easiest way to flash it is the
-[Cryptspeak Web Flasher](https://0x00001312.github.io/CryptspeakFlasher/) — it flashes
+[Cryptspeak Web Flasher](https://cryptspeak.github.io/webFlasher/) — it flashes
 pre-built release firmware straight from your browser (Chrome/Edge, via WebSerial) over
 USB, no local toolchain required.
 
@@ -272,10 +272,15 @@ make flash     # build + flash over USB (PORT=/dev/ttyACM0 by default)
 - **Base firmware** — this is a fork of
   [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer), with the
   Cryptspeak at-rest encryption layer added on top.
-- **Reticulum** — standalone mode uses a
-  [custom fork](https://github.com/ratspeak/microReticulum) of
+- **Reticulum** — standalone mode uses
+  [cryptspeak/microReticulum](https://github.com/cryptspeak/microReticulum), our
+  fork of [ratspeak's fork](https://github.com/ratspeak/microReticulum) of
   [microReticulum](https://github.com/attermann/microReticulum), originally
   written by [Chad Atterman](https://github.com/attermann).
+- **Crypto primitives** — the AES, CTR, and HMAC primitives in `lib/Crypto` are
+  a vendored copy of [rweather/arduinolibs](https://github.com/rweather/arduinolibs)'
+  Crypto library, via [Chad Attermann's fork](https://github.com/attermann/Crypto),
+  MIT licensed.
 - **Encryption design** — the at-rest encryption approach in this firmware
   builds on the idea and proof-of-concept from
   [konsumer](https://github.com/konsumer)'s
@@ -294,3 +299,6 @@ Ratspeak's Cardputer standalone application, partition tables, and packaging too
 
 The SX1262 driver in `src/radio/` carries its own MIT license terms — see
 the attribution comment at the top of [`SX1262.cpp`](src/radio/SX1262.cpp).
+
+`lib/Crypto` carries its own MIT license terms — see
+[`lib/Crypto/LICENSE`](lib/Crypto/LICENSE).

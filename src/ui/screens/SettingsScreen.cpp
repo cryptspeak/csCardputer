@@ -1166,7 +1166,7 @@ void SettingsScreen::renderAbout(M5Canvas& canvas) {
     canvas.drawString("Cap LoRa-1262 (SX1262)", 4, y); y += 10;
 
     canvas.setTextColor(Theme::MUTED);
-    canvas.drawString("rsCardputer-CE", 4, y); y += 12;
+    canvas.drawString("csCardputer", 4, y); y += 12;
 
     canvas.setTextColor(Theme::SECONDARY);
     String idLine = "ID: " + _identityHash;
