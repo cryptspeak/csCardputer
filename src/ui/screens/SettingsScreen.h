@@ -4,6 +4,7 @@
 #include "ui/UIManager.h"
 #include "ui/widgets/ScrollList.h"
 #include "ui/widgets/TextInput.h"
+#include "ui/widgets/OptionPopup.h"
 #include "config/UserConfig.h"
 #include "storage/FlashStore.h"
 #include "storage/SDStore.h"
@@ -70,7 +71,15 @@ private:
     enum SubMenu { MENU_MAIN, MENU_RADIO, MENU_WIFI, MENU_TCP, MENU_SDCARD,
                    MENU_DISPLAY, MENU_AUDIO, MENU_ABOUT, MENU_WIFI_SCAN, MENU_THEME,
                    MENU_DISPLAY_SCREEN, MENU_THEME_CUSTOM, MENU_THEME_MIXER, MENU_TIME,
-                   MENU_SECURITY, MENU_AUTOLOCK, MENU_RADIO_CONFIG, MENU_MESSAGING };
+                   MENU_SECURITY, MENU_RADIO_CONFIG, MENU_MESSAGING };
+
+    // What an OptionPopup confirmation should do once Enter is pressed —
+    // set on open(), read back in the shared confirm handler so every
+    // small fixed-choice setting (WiFi Mode, Auto-Lock, on/off toggles...)
+    // can share one popup instance instead of one bespoke modal each.
+    enum PopupPurpose { POPUP_NONE, POPUP_WIFI_MODE, POPUP_DURESS_ACTION,
+                         POPUP_AUDIO, POPUP_TIME_SOURCE, POPUP_AUTO_LAN,
+                         POPUP_THEME_INPUT, POPUP_AUTOLOCK };
 
     void buildMainMenu();
     void buildMessagingMenu();
@@ -85,7 +94,9 @@ private:
     void buildAudioMenu();
     void buildTimeMenu();
     void buildSecurityMenu();
-    void buildAutoLockMenu();
+    void openPopup(PopupPurpose purpose, const std::string& title,
+                    std::vector<std::string> options, int selectedIndex);
+    void onPopupConfirmed(int result);
     void startDuressSetup();
     void cancelDuressSetup();
     void onDuressInputSubmit(const std::string& value);
@@ -144,24 +155,21 @@ private:
     OpenDiagnosticsCallback _openDiagnosticsCb;
     TCPReloadCallback _tcpReloadCb;
 
-    // Duress password — small popups drawn on top of this screen (never a
-    // full-screen takeover). Selecting "Duress Password" in Security opens
-    // _duressMenuActive: a tiny Enable/Disable + Reset action popup. Picking
-    // Enable or Reset from there opens _duressEntryActive: the masked
-    // password entry popup (two stages: enter, then confirm).
-    bool _duressMenuActive = false;
-    int _duressMenuSelected = 0;   // row index within the action popup
+    // Shared popup for every small fixed-choice setting (WiFi Mode,
+    // Auto-Lock, Duress action, on/off toggles...) — see PopupPurpose.
+    // openPopup() sets _popupPurpose and opens _optionPopup; the confirm
+    // branch in onPopupConfirmed() dispatches on _popupPurpose.
+    OptionPopup _optionPopup;
+    PopupPurpose _popupPurpose = POPUP_NONE;
 
+    // Duress password — picking Enable/Reset from the action popup above
+    // opens _duressEntryActive: the masked password entry popup (two
+    // stages: enter, then confirm). This part isn't an OptionPopup since
+    // it's free-text input, not a choice among fixed options.
     bool _duressEntryActive = false;
     int _duressStage = 0;          // 0 = enter password, 1 = confirm password
     String _duressFirstPw;
     TextInput _duressInput;
-
-    // WiFi mode popup — same family as the Duress action popup: a fixed,
-    // small set of options (OFF/AP/STA) shown as marked rows instead of a
-    // blind cycle-on-Enter with no visible alternatives.
-    bool _wifiModeMenuActive = false;
-    int _wifiModeMenuSelected = 0;
 
     // WiFi scan state
     struct WiFiNetwork { String ssid; int32_t rssi; uint8_t encType; };

@@ -76,12 +76,12 @@ void SettingsScreen::buildMainMenu() {
     _list.clear();
     _list.addItem("Radio");
     _list.addItem("Wi-Fi");
-    _list.addItem("SD Card");
     _list.addItem("Display");
     _list.addItem("Audio");
     _list.addItem("Time");
     _list.addItem("Security");
     _list.addItem("Messaging");
+    _list.addItem("SD Card");
     _list.addItem("About");
     _list.addItem("Factory Reset", Theme::ERROR);
 }
@@ -113,10 +113,10 @@ void SettingsScreen::buildTimeMenu() {
     _list.addItem("< Back");
 }
 
-// Auto-lock preset list — fixed minute values selectable from the menu
-// (see buildAutoLockMenu()). 0 = disabled. Kept as a single table so the
-// status label (buildSecurityMenu) and the picker (buildAutoLockMenu) can
-// never drift out of sync with each other.
+// Auto-lock preset list — fixed minute values selectable via the
+// POPUP_AUTOLOCK popup (see onPopupConfirmed()). 0 = disabled. Kept as a
+// single table so the status label (buildSecurityMenu) and the popup's
+// options can never drift out of sync with each other.
 struct AutoLockOption { uint16_t minutes; const char* label; };
 static const AutoLockOption kAutoLockOptions[] = {
     {30,  "30 min"},
@@ -135,10 +135,9 @@ static const char* autoLockLabel(uint16_t minutes) {
     return "Disabled";
 }
 
-// Security menu: each row is a status summary. Auto-Lock opens its own
-// picker page; Duress Password opens a small action popup instead (see
-// _duressMenuActive) — it only ever has 1-2 actions, not enough content to
-// earn a full page of its own.
+// Security menu: each row is a status summary. Both Duress Password and
+// Auto-Lock open a small OptionPopup instead of a dedicated page — neither
+// has enough options to need one (see openPopup/onPopupConfirmed).
 void SettingsScreen::buildSecurityMenu() {
     _list.clear();
     bool configured = Duress::isConfigured();
@@ -151,21 +150,83 @@ void SettingsScreen::buildSecurityMenu() {
     _list.addItem("< Back");
 }
 
-// Auto-lock: reboots the device back to the at-rest password screen after
-// the chosen period of inactivity, discarding the decrypted identity from
-// RAM in the process. Picker mirrors the Theme preset list (buildThemeMenu)
-// — selecting a row applies it immediately and updates the ">" marker.
-void SettingsScreen::buildAutoLockMenu() {
-    _list.clear();
-    if (!_config) return;
-    uint16_t current = _config->settings().autoLockMinutes;
+void SettingsScreen::openPopup(PopupPurpose purpose, const std::string& title,
+                                std::vector<std::string> options, int selectedIndex) {
+    _popupPurpose = purpose;
+    _optionPopup.open(title, std::move(options), selectedIndex);
+}
 
-    for (auto& o : kAutoLockOptions) {
-        char label[24];
-        snprintf(label, sizeof(label), "%s[%s]", (o.minutes == current) ? ">" : " ", o.label);
-        _list.addItem(label, (o.minutes == current) ? Theme::PRIMARY : 0);
+// Dispatches on the purpose set by openPopup() — one shared confirm path
+// for every small fixed-choice setting instead of one bespoke handler per
+// popup. Each case does exactly what its old inline toggle/page-select code
+// did: write the field, applyAndSave(), rebuild the menu it was opened from.
+void SettingsScreen::onPopupConfirmed(int result) {
+    PopupPurpose purpose = _popupPurpose;
+    _popupPurpose = POPUP_NONE;
+    if (!_config) return;
+    auto& s = _config->settings();
+
+    switch (purpose) {
+        case POPUP_WIFI_MODE:
+            s.wifiMode = (RatWiFiMode)result;
+            applyAndSave();
+            showToast("Reboot to apply");
+            buildWiFiMenu();
+            break;
+
+        case POPUP_DURESS_ACTION: {
+            bool configured = Duress::isConfigured();
+            if (result == 0) {
+                if (configured) {
+                    _confirmPending = true;
+                    _confirmAction = 2;
+                } else {
+                    startDuressSetup();
+                }
+            } else if (result == 1 && configured) {
+                startDuressSetup();
+            }
+            break;
+        }
+
+        case POPUP_AUDIO:
+            s.audioEnabled = (result == 0);
+            if (_audio) _audio->setEnabled(s.audioEnabled);
+            applyAndSave();
+            buildAudioMenu();
+            break;
+
+        case POPUP_TIME_SOURCE:
+            s.manualTimezoneEnabled = (result == 1);
+            applyAndSave();
+            buildTimeMenu();
+            break;
+
+        case POPUP_AUTO_LAN:
+            // IPv6 enable is one-shot per WiFi init, so changes take effect
+            // on next reboot — same as before this was a popup.
+            s.autoIfaceEnabled = (result == 0);
+            applyAndSave();
+            showToast("Reboot to apply");
+            buildWiFiMenu();
+            break;
+
+        case POPUP_THEME_INPUT:
+            _useMixer = (result == 1);
+            buildThemeCustomMenu();
+            break;
+
+        case POPUP_AUTOLOCK:
+            if (result >= 0 && result < kAutoLockOptionCount) {
+                s.autoLockMinutes = kAutoLockOptions[result].minutes;
+                applyAndSave();
+                buildSecurityMenu();
+            }
+            break;
+
+        default:
+            break;
     }
-    _list.addItem("< Back");
 }
 
 // Opens the small inline duress-password popup (see render()'s
@@ -174,7 +235,6 @@ void SettingsScreen::buildAutoLockMenu() {
 // cancelable with Esc at any point, same as any other Settings field edit.
 // Closes the action popup first if that's what led here (Enable/Reset).
 void SettingsScreen::startDuressSetup() {
-    _duressMenuActive = false;
     _duressStage = 0;
     _duressFirstPw = "";
     _duressInput.clear();
@@ -257,11 +317,11 @@ void SettingsScreen::buildRadioConfigMenu() {
 
     snprintf(buf, sizeof(buf), "Frequency: %lu Hz", (unsigned long)s.loraFrequency);
     _list.addItem(buf);
-    snprintf(buf, sizeof(buf), "SF: %d", s.loraSF);
+    snprintf(buf, sizeof(buf), "Spreading Factor: %d", s.loraSF);
     _list.addItem(buf);
-    snprintf(buf, sizeof(buf), "BW: %lu Hz", (unsigned long)s.loraBW);
+    snprintf(buf, sizeof(buf), "Bandwidth: %lu Hz", (unsigned long)s.loraBW);
     _list.addItem(buf);
-    snprintf(buf, sizeof(buf), "CR: %d", s.loraCR);
+    snprintf(buf, sizeof(buf), "Coding Rate: %d", s.loraCR);
     _list.addItem(buf);
     snprintf(buf, sizeof(buf), "TX Power: %d dBm", s.loraTxPower);
     _list.addItem(buf);
@@ -319,7 +379,7 @@ void SettingsScreen::buildTCPMenu() {
     if (!_config) return;
     auto& s = _config->settings();
 
-    _list.addItem("+ Add Connection");
+    _list.addItem("Add Connection");
 
     for (size_t i = 0; i < s.tcpConnections.size(); i++) {
         auto& ep = s.tcpConnections[i];
@@ -421,7 +481,7 @@ void SettingsScreen::buildSDCardMenu() {
         snprintf(buf, sizeof(buf), "Free: %llu MB", free / (1024 * 1024));
         _list.addItem(buf);
 
-        _list.addItem("Initialize Standalone");
+        _list.addItem("Initialize SD Storage");
         _list.addItem("Wipe All Data", Theme::ERROR);
     } else {
         _list.addItem("Status: NOT INSERTED");
@@ -556,7 +616,7 @@ void SettingsScreen::buildDisplayMenu() {
     _list.addItem("Screen");
     _list.addItem("Theme");
     String name = s.displayName.isEmpty() ? "(none)" : s.displayName;
-    _list.addItem("Name: " + std::string(name.c_str()));
+    _list.addItem("Device Name: " + std::string(name.c_str()));
     _list.addItem("< Back");
 }
 
@@ -947,7 +1007,7 @@ void SettingsScreen::render(M5Canvas& canvas) {
     const char* headers[] = {"SETTINGS", "RADIO", "WIFI", "TCP CONNECTIONS",
                              "SD CARD", "DISPLAY", "AUDIO", "ABOUT", "WIFI SCAN", "THEME",
                              "SCREEN", "CUSTOM THEME", "MIX COLOR", "TIME", "SECURITY",
-                             "AUTO-LOCK", "RADIO CONFIG", "MESSAGING"};
+                             "RADIO CONFIG", "MESSAGING"};
     const int headerH = Theme::SECTION_HEADER_H;
     canvas.fillRect(0, y0, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
     canvas.fillRect(0, y0 + 2, 3, headerH - 4, Theme::ACCENT);
@@ -1005,36 +1065,9 @@ void SettingsScreen::render(M5Canvas& canvas) {
         canvas.print(prompt);
     }
 
-    // Duress password action popup — small modal listing 1-2 selectable
-    // actions (Enable/Disable, Reset) instead of a full settings page.
-    // Picking Enable or Reset opens the masked entry popup below it.
-    if (_duressMenuActive) {
-        bool configured = Duress::isConfigured();
-        int rowCount = configured ? 2 : 1;
-        const char* toggleLabel = configured ? "Disable" : "Enable";
-
-        int bw = 140;
-        int bh = 22 + rowCount * 11;
-        int bx = (Theme::CONTENT_W - bw) / 2;
-        int by = Theme::CONTENT_Y + (Theme::CONTENT_H - bh) / 2;
-        canvas.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
-        canvas.drawRoundRect(bx, by, bw, bh, 3, Theme::PRIMARY);
-        canvas.setTextColor(Theme::PRIMARY);
-        canvas.setCursor(bx + 6, by + 5);
-        canvas.print("Duress Password");
-
-        int ry = by + 16;
-        for (int i = 0; i < rowCount; i++) {
-            bool sel = (_duressMenuSelected == i);
-            const char* label = (i == 0) ? toggleLabel : "Reset Password";
-            canvas.setTextColor(sel ? Theme::PRIMARY : Theme::TEXT_SECONDARY);
-            canvas.setCursor(bx + 8, ry);
-            canvas.print(sel ? "> [" : "  [");
-            canvas.print(label);
-            canvas.print("]");
-            ry += 11;
-        }
-    }
+    // Shared popup for every small fixed-choice setting (WiFi Mode,
+    // Auto-Lock, Duress action, on/off toggles...) — see PopupPurpose.
+    _optionPopup.render(canvas);
 
     // Duress password popup overlay — small modal, same family as the
     // confirm dialog above, with a masked input field in place of Y/N.
@@ -1054,31 +1087,6 @@ void SettingsScreen::render(M5Canvas& canvas) {
         canvas.setTextColor(Theme::MUTED);
         canvas.setCursor(bx + 6, by + 37);
         canvas.print(hint);
-    }
-
-    // WiFi mode popup — same family as the Duress action popup above.
-    if (_wifiModeMenuActive) {
-        static const char* kWifiModeLabels[3] = {"OFF", "AP", "STA"};
-        int bw = 110;
-        int bh = 22 + 3 * 11;
-        int bx = (Theme::CONTENT_W - bw) / 2;
-        int by = Theme::CONTENT_Y + (Theme::CONTENT_H - bh) / 2;
-        canvas.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
-        canvas.drawRoundRect(bx, by, bw, bh, 3, Theme::PRIMARY);
-        canvas.setTextColor(Theme::PRIMARY);
-        canvas.setCursor(bx + 6, by + 5);
-        canvas.print("WiFi Mode");
-
-        int ry = by + 16;
-        for (int i = 0; i < 3; i++) {
-            bool sel = (_wifiModeMenuSelected == i);
-            canvas.setTextColor(sel ? Theme::PRIMARY : Theme::TEXT_SECONDARY);
-            canvas.setCursor(bx + 8, ry);
-            canvas.print(sel ? "> [" : "  [");
-            canvas.print(kWifiModeLabels[i]);
-            canvas.print("]");
-            ry += 11;
-        }
     }
 
     // Toast overlay (drawn on top of everything)
@@ -1204,66 +1212,15 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
         return true;
     }
 
-    // Duress password action popup — Esc closes, ;/. move between the 1-2
-    // rows, Enter activates the selected one (see render() for the rows).
-    if (_duressMenuActive) {
-        bool configured = Duress::isConfigured();
-        int rowCount = configured ? 2 : 1;
-
-        if (event.character == 27) {
-            _duressMenuActive = false;
-            return true;
-        }
-        if (event.character == ';') {
-            _duressMenuSelected = (_duressMenuSelected + rowCount - 1) % rowCount;
-            return true;
-        }
-        if (event.character == '.') {
-            _duressMenuSelected = (_duressMenuSelected + 1) % rowCount;
-            return true;
-        }
-        if (event.enter) {
-            if (_duressMenuSelected == 0) {
-                _duressMenuActive = false;
-                if (configured) {
-                    _confirmPending = true;
-                    _confirmAction = 2;
-                } else {
-                    startDuressSetup();
-                }
-            } else if (_duressMenuSelected == 1 && configured) {
-                startDuressSetup();
-            }
-            return true;
-        }
-        return true;  // swallow anything else while the popup is active
-    }
-
-    // WiFi mode popup — Esc closes, ;/. move between OFF/AP/STA, Enter
-    // applies the selected mode (see render() for the rows).
-    if (_wifiModeMenuActive) {
-        if (event.character == 27) {
-            _wifiModeMenuActive = false;
-            return true;
-        }
-        if (event.character == ';') {
-            _wifiModeMenuSelected = (_wifiModeMenuSelected + 2) % 3;
-            return true;
-        }
-        if (event.character == '.') {
-            _wifiModeMenuSelected = (_wifiModeMenuSelected + 1) % 3;
-            return true;
-        }
-        if (event.enter) {
-            _wifiModeMenuActive = false;
-            auto& s = _config->settings();
-            s.wifiMode = (RatWiFiMode)_wifiModeMenuSelected;
-            applyAndSave();
-            showToast("Reboot to apply");
-            buildWiFiMenu();
-            return true;
-        }
-        return true;  // swallow anything else while the popup is active
+    // Shared popup for every small fixed-choice setting — Esc cancels
+    // (handled inside OptionPopup), Enter confirms and dispatches through
+    // onPopupConfirmed() based on the purpose set by openPopup().
+    if (_optionPopup.isActive()) {
+        bool confirmed = false;
+        int result = -1;
+        _optionPopup.handleKey(event, &confirmed, &result);
+        if (confirmed) onPopupConfirmed(result);
+        return true;
     }
 
     // Duress password popup — small inline modal (see render()). Esc cancels
@@ -1341,11 +1298,6 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             buildRadioMenu();
             return true;
         }
-        if (_subMenu == MENU_AUTOLOCK) {
-            _subMenu = MENU_SECURITY;
-            buildSecurityMenu();
-            return true;
-        }
         if (_subMenu != MENU_MAIN) {
             _subMenu = MENU_MAIN;
             buildMainMenu();
@@ -1387,12 +1339,12 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             switch (sel) {
                 case 0: _subMenu = MENU_RADIO; buildRadioMenu(); break;
                 case 1: _subMenu = MENU_WIFI; buildWiFiMenu(); break;
-                case 2: _subMenu = MENU_SDCARD; buildSDCardMenu(); break;
-                case 3: _subMenu = MENU_DISPLAY; buildDisplayMenu(); break;
-                case 4: _subMenu = MENU_AUDIO; buildAudioMenu(); break;
-                case 5: _subMenu = MENU_TIME; buildTimeMenu(); break;
-                case 6: _subMenu = MENU_SECURITY; buildSecurityMenu(); break;
-                case 7: _subMenu = MENU_MESSAGING; buildMessagingMenu(); break;
+                case 2: _subMenu = MENU_DISPLAY; buildDisplayMenu(); break;
+                case 3: _subMenu = MENU_AUDIO; buildAudioMenu(); break;
+                case 4: _subMenu = MENU_TIME; buildTimeMenu(); break;
+                case 5: _subMenu = MENU_SECURITY; buildSecurityMenu(); break;
+                case 6: _subMenu = MENU_MESSAGING; buildMessagingMenu(); break;
+                case 7: _subMenu = MENU_SDCARD; buildSDCardMenu(); break;
                 case 8: _subMenu = MENU_ABOUT; break;
                 case 9: _confirmPending = true; _confirmAction = 0; break;
             }
@@ -1431,9 +1383,6 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             } else if (_subMenu == MENU_RADIO_CONFIG) {
                 _subMenu = MENU_RADIO;
                 buildRadioMenu();
-            } else if (_subMenu == MENU_AUTOLOCK) {
-                _subMenu = MENU_SECURITY;
-                buildSecurityMenu();
             } else {
                 _subMenu = MENU_MAIN;
                 buildMainMenu();
@@ -1482,13 +1431,12 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             return true;
         }
 
-        // Theme > Custom: item 0 toggles Hex/Mix input mode, items 1..7 are
-        // the base hues — opening either the hex field or the RGB mixer
-        // depending on that toggle.
+        // Theme > Custom: item 0 opens the Hex/Mix input mode popup, items
+        // 1..7 are the base hues — opening either the hex field or the RGB
+        // mixer depending on that mode.
         if (_subMenu == MENU_THEME_CUSTOM) {
             if (sel == 0) {
-                _useMixer = !_useMixer;
-                buildThemeCustomMenu();
+                openPopup(POPUP_THEME_INPUT, "Input Mode", {"Hex", "Mix"}, _useMixer ? 1 : 0);
                 return true;
             }
             int row = sel - 1;
@@ -1504,24 +1452,20 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             return true;
         }
 
-        // Toggle audio on/off (item 0 in Audio menu)
+        // Audio on/off (item 0 in Audio menu)
         if (_subMenu == MENU_AUDIO && sel == 0) {
             auto& s = _config->settings();
-            s.audioEnabled = !s.audioEnabled;
-            if (_audio) _audio->setEnabled(s.audioEnabled);
-            applyAndSave();
-            buildAudioMenu();
+            openPopup(POPUP_AUDIO, "Audio", {"On", "Off"}, s.audioEnabled ? 0 : 1);
             return true;
         }
 
-        // Time menu: item 0 toggles manual override; item 1 (only present
-        // while manual is on) edits the UTC offset.
+        // Time menu: item 0 opens the Time Source popup; item 1 (only
+        // present while manual is on) edits the UTC offset.
         if (_subMenu == MENU_TIME) {
             auto& s = _config->settings();
             if (sel == 0) {
-                s.manualTimezoneEnabled = !s.manualTimezoneEnabled;
-                applyAndSave();
-                buildTimeMenu();
+                openPopup(POPUP_TIME_SOURCE, "Time Source", {"Auto (GPS)", "Manual"},
+                          s.manualTimezoneEnabled ? 1 : 0);
                 return true;
             }
             if (sel == 1 && s.manualTimezoneEnabled) {
@@ -1533,30 +1477,26 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
             return true;  // Back (last item) handled above
         }
 
-        // Security menu: Duress Password opens the small action popup
-        // (handled up top via _duressMenuActive); Auto-Lock opens its own
-        // picker page.
+        // Security menu: Duress Password and Auto-Lock both open a popup
+        // (see openPopup/onPopupConfirmed) instead of a dedicated page.
         if (_subMenu == MENU_SECURITY) {
             if (sel == 0) {
-                _duressMenuActive = true;
-                _duressMenuSelected = 0;
+                bool configured = Duress::isConfigured();
+                std::vector<std::string> options = {configured ? "Disable" : "Enable"};
+                if (configured) options.push_back("Reset Password");
+                openPopup(POPUP_DURESS_ACTION, "Duress Password", options, 0);
                 return true;
             }
             if (sel == 1) {
-                _subMenu = MENU_AUTOLOCK;
-                buildAutoLockMenu();
+                std::vector<std::string> options;
+                int current = 0;
+                uint16_t minutes = _config ? _config->settings().autoLockMinutes : 0;
+                for (int i = 0; i < kAutoLockOptionCount; i++) {
+                    options.push_back(kAutoLockOptions[i].label);
+                    if (kAutoLockOptions[i].minutes == minutes) current = i;
+                }
+                openPopup(POPUP_AUTOLOCK, "Auto-Lock", options, current);
                 return true;
-            }
-            return true;  // Back (last item) handled above
-        }
-
-        // Auto-Lock picker: selecting a preset applies it immediately and
-        // refreshes the marker, same interaction as the Theme preset list.
-        if (_subMenu == MENU_AUTOLOCK) {
-            if (sel >= 0 && sel < kAutoLockOptionCount && _config) {
-                _config->settings().autoLockMinutes = kAutoLockOptions[sel].minutes;
-                applyAndSave();
-                buildAutoLockMenu();
             }
             return true;  // Back (last item) handled above
         }
@@ -1564,8 +1504,8 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
         // WiFi mode (item 0 in WiFi menu) — opens the mode popup instead of
         // blindly cycling on every Enter press.
         if (_subMenu == MENU_WIFI && sel == 0) {
-            _wifiModeMenuActive = true;
-            _wifiModeMenuSelected = (int)_config->settings().wifiMode;
+            openPopup(POPUP_WIFI_MODE, "WiFi Mode", {"OFF", "AP", "STA"},
+                      (int)_config->settings().wifiMode);
             return true;
         }
 
@@ -1596,14 +1536,10 @@ bool SettingsScreen::handleKey(const KeyEvent& event) {
                 return true;
             }
             if (sel == 5) {
-                // Toggle Auto-discover LAN (AutoInterface).  IPv6 enable
-                // is one-shot per WiFi init, so changes take effect on
-                // next reboot.
+                // Auto-discover LAN (AutoInterface) on/off popup.
                 auto& s = _config->settings();
-                s.autoIfaceEnabled = !s.autoIfaceEnabled;
-                applyAndSave();
-                showToast("Reboot to apply");
-                buildWiFiMenu();
+                openPopup(POPUP_AUTO_LAN, "Auto-discover LAN", {"On", "Off"},
+                          s.autoIfaceEnabled ? 0 : 1);
                 return true;
             }
         }
