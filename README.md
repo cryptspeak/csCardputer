@@ -157,6 +157,21 @@ certain things (announce-derived destination hashes, in-flight packets)
 are intentionally out of scope, is in
 [`docs/threat-model.md`](docs/threat-model.md).
 
+### Duress password & auto-lock
+
+Settings → Security adds two opt-in, default-off protections on top of
+the at-rest encryption above:
+
+- **Duress password** — a second password that, entered at the unlock
+  screen instead of the real one, wipes the identity, messages,
+  contacts, and settings on every storage tier and reboots straight
+  into first-time setup, with no "wiped" indicator shown. See
+  [`docs/duress-password.md`](docs/duress-password.md).
+- **Auto-lock** — pick an idle timeout (30 min, 1h, 4h, 8h, 12h) and the
+  device reboots back to the password screen after that much
+  inactivity, discarding the decrypted identity from RAM until the real
+  password is re-entered.
+
 ## Documentation
 
 The [`docs/`](docs/README.md) folder has the full picture — both the
@@ -169,11 +184,15 @@ encryption design and the rest of the firmware's architecture:
 | [docs/encryption-messages.md](docs/encryption-messages.md) | At-rest encryption of LXMF messages |
 | [docs/encryption-contacts-settings.md](docs/encryption-contacts-settings.md) | At-rest encryption of contacts and device settings, and how both upgrade paths (plaintext → encrypted, and partially-encrypted → fully-encrypted) are handled |
 | [docs/boot-sequence.md](docs/boot-sequence.md) | The full boot flow and exactly when each encryption domain gets wired up |
+| [docs/duress-password.md](docs/duress-password.md) | The optional second password that wipes the device instead of unlocking it |
 | [docs/threat-model.md](docs/threat-model.md) | What this defends against, and what it explicitly doesn't |
 | [docs/firmware-architecture.md](docs/firmware-architecture.md) | Directory layout and how the major modules fit together |
 | [docs/storage-layer.md](docs/storage-layer.md) | `FlashStore`/`SDStore`/`WriteQueue` — the storage tiers everything else is built on |
+| [docs/theme-config.md](docs/theme-config.md) | Custom color themes, and why `theme.json` is deliberately unencrypted |
 | [docs/reticulum-integration.md](docs/reticulum-integration.md) | `ReticulumManager` — endpoint config, announce-flood defense, the background persist task |
 | [docs/lxmf-messaging.md](docs/lxmf-messaging.md) | LXMF send/receive flow, delivery proofs, on-disk message format and capacity limits |
+| [docs/lxmf-stamps.md](docs/lxmf-stamps.md) | Anti-spam proof-of-work stamps — `LXStamper`'s feasibility trick, wire format, cost ceiling |
+| [docs/propagation-nodes.md](docs/propagation-nodes.md) | Why propagation-node (offline messaging) support was attempted and then removed |
 | [docs/announce-discovery.md](docs/announce-discovery.md) | Peer discovery, app_data name parsing, contacts vs. the name cache |
 | [docs/network-interfaces.md](docs/network-interfaces.md) | LoRa/WiFi/TCP/AutoInterface/BLE interfaces and the SX1262 radio driver |
 | [docs/hardware-platform.md](docs/hardware-platform.md) | GPS, keyboard/hotkeys, power, audio, pin reference |
