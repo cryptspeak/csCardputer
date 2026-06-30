@@ -5,6 +5,16 @@ Versioning is independent of upstream
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) — see
 `docs/firmware-architecture.md`.
 
+## v0.1.1 — Repo Move
+
+Repo transferred from the original maintainer's account to the
+cryptspeak org and renamed rsCardputer-CE → csCardputer, another step
+in growing independent of [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer),
+the project this started as a fork of. No functional changes —
+branding, docs, and dependency links updated to match.
+
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.1.0...v0.1.1
+
 ## v0.1.0 — Duress Password, Auto-Lock, Anti-Spam Stamps & Radio Reliability
 
 ### Added
