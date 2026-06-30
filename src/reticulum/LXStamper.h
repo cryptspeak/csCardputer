@@ -4,15 +4,14 @@
 #include <cstdint>
 #include <functional>
 
-// Proof-of-work "stamp" generation/validation for LXMF anti-spam stamps
-// (direct delivery) and propagation-node submission stamps. See
+// Proof-of-work "stamp" generation/validation for LXMF anti-spam stamps. See
 // docs/lxmf-stamps.md for the wire format and the feasibility story.
 //
 // The reference Python implementation (LXMF's LXStamper.py) builds a large
 // "workblock" -- 3000 HKDF rounds x 256 bytes = ~750KB for a normal message
-// stamp, 1000 rounds = ~250KB for a propagation stamp -- and re-hashes the
-// *entire* workblock plus a random 32-byte candidate on every brute-force
-// attempt. That's infeasible on this device's heap (~55KB free, no PSRAM).
+// stamp -- and re-hashes the *entire* workblock plus a random 32-byte
+// candidate on every brute-force attempt. That's infeasible on this
+// device's heap (~55KB free, no PSRAM).
 //
 // Instead, Workblock streams the HKDF rounds through one SHA256 instance as
 // they're generated (never holding more than one 256-byte chunk at a time),
@@ -24,9 +23,8 @@
 // re-hashing the workblock per attempt.
 namespace LXStamper {
 
-constexpr size_t STAMP_SIZE = 32;                  // RNS::Identity::HASHLENGTH / 8
-constexpr int WORKBLOCK_EXPAND_ROUNDS    = 3000;   // normal (direct-delivery) message stamp
-constexpr int WORKBLOCK_EXPAND_ROUNDS_PN = 1000;   // propagation-node submission stamp
+constexpr size_t STAMP_SIZE = 32;             // RNS::Identity::HASHLENGTH / 8
+constexpr int WORKBLOCK_EXPAND_ROUNDS = 3000; // direct-delivery message stamp
 
 // A workblock snapshot for one piece of `material` (a message_id or
 // transient_id). Build once, then check as many candidate stamps against

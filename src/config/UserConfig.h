@@ -78,14 +78,6 @@ struct UserSettings {
     // automatically in the background; above it, the user is asked first.
     // See LXStamper.h for what "cost" means on this hardware.
     uint8_t stampCostCeiling = 12;
-
-    // LXMF propagation node (offline messaging) — client only, see
-    // docs/propagation-nodes.md. Off by default: the user opts in via
-    // Settings > Messaging > Propagation Node before any of this is used.
-    // Empty hash = none configured.
-    bool propagationNodeEnabled = false;
-    String propagationNodeHash = "";
-    bool propagationAutoSync = false;
 };
 
 class UserConfig {

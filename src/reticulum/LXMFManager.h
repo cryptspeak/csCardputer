@@ -2,7 +2,6 @@
 
 #include "LXMFMessage.h"
 #include "LXStamper.h"
-#include "PropagationClient.h"
 #include "ReticulumManager.h"
 #include "storage/MessageStore.h"
 #include <Destination.h>
@@ -36,10 +35,9 @@ public:
     // Status callback (fires when send completes with SENT/FAILED)
     void setStatusCallback(StatusCallback cb) { _statusCb = cb; }
 
-    // Fires once per successful send (direct or PN handoff) with a short
-    // tag describing how it actually went out -- e.g. "LoRa", "TCP",
-    // "PN/LoRa" -- so the UI can show real routing instead of leaving the
-    // user to guess whether propagation-node fallback was used.
+    // Fires once per successful send with a short tag describing how it
+    // actually went out -- e.g. "LoRa", "TCP" -- so the UI can show real
+    // routing instead of leaving the user to guess.
     using RouteInfoCallback = std::function<void(const std::string& peerHex, const std::string& routeTag)>;
     void setRouteInfoCallback(RouteInfoCallback cb) { _routeInfoCb = cb; }
 
@@ -79,32 +77,9 @@ public:
     void setStampConfirmCallback(StampConfirmCallback cb) { _stampConfirmCb = cb; }
     void confirmStamping(const std::string& peerHex, bool proceed);
 
-    // ── Propagation node (offline messaging) ────────────────────────────
-    // Externally-owned (main.cpp registers it as an AnnounceHandler too,
-    // same lifetime as ReticulumManager). Direct delivery still tried
-    // first, every time -- this is only consulted once direct delivery's
-    // own retry budget is exhausted (see sendDirect()).
-    void setPropagationClient(PropagationClient* pc);
-
     // For per-peer interface stickiness in sendDirect() (see there) --
-    // externally owned, same lifetime/wiring pattern as setPropagationClient().
+    // externally owned, same lifetime as ReticulumManager.
     void setAnnounceManager(AnnounceManager* am) { _announceManager = am; }
-    // Empty hash (default) disables PN fallback -- messages just FAIL
-    // when direct delivery can't reach the peer, same as before this
-    // feature existed.
-    void setPreferredPropagationNode(const RNS::Bytes& hash) { _propagationNodeHash = hash; }
-
-    // Manually pull mail waiting at the preferred PN. Returns false if no
-    // PN is configured, one isn't reachable yet, or a sync is already
-    // running. Decoded messages flow through the normal incoming pipeline
-    // (dedup/storage/UI) automatically.
-    bool syncPropagationNode();
-    bool propagationSyncInFlight() const;
-    // Status of the last completed sync, for UI display (Settings > Messaging).
-    // lastSyncAtMs() == 0 means "never synced this boot."
-    unsigned long lastSyncAtMs() const { return _lastSyncAtMs; }
-    bool lastSyncOk() const { return _lastSyncOk; }
-    int lastSyncMessageCount() const { return _lastSyncMsgCount; }
 
 private:
     bool sendDirect(LXMFMessage& msg);
@@ -179,7 +154,6 @@ private:
     // device's "one peer/one flow at a time" design elsewhere (see _outLink).
     struct StampReq { uint8_t material[32]; int targetCost; int expandRounds; };
     struct StampRes { uint8_t material[32]; uint8_t stamp[32]; uint8_t ok; };
-    enum class StampPurpose : uint8_t { DIRECT, PROPAGATION };
 
     void startStampTaskIfNeeded();
     static void stampTaskFunc(void* param);
@@ -188,9 +162,6 @@ private:
     // to the stamp task). Caller must already hold the single in-flight slot
     // free (`!_stampInFlight`).
     void beginStamping(LXMFMessage& msg, int targetCost);
-    // Same background task, but for a propagation-submission stamp (keyed
-    // by transient_id, not messageId -- see PropagationClient::prepareSubmission).
-    void beginPropagationStamping(const RNS::Bytes& transientId, int targetCost);
 
     int _stampCostCeiling = 12;
     StampConfirmCallback _stampConfirmCb;
@@ -201,23 +172,6 @@ private:
     QueueHandle_t _stampRequestQueue = nullptr;  // depth 1 -- one job in flight
     QueueHandle_t _stampResultQueue = nullptr;   // depth 1
     bool _stampInFlight = false;
-    StampPurpose _stampPurpose = StampPurpose::DIRECT;
-
-    // ── Propagation node fallback/sync ───────────────────────────────────
-    // Called once direct delivery's own retry budget is exhausted but the
-    // recipient's identity IS known (we just can't currently route to
-    // them) -- see sendDirect(). Returns true if the message is now
-    // pending via the PN (keep it queued, don't mark FAILED), false if PN
-    // fallback isn't available/applicable (caller should fail as before).
-    bool tryPropagationFallback(LXMFMessage& msg);
-    void onPropagationSubmitDone(const RNS::Bytes& recipientHash, bool delivered);
-    void onPropagationMessageDecoded(const uint8_t* data, size_t len);
-
-    PropagationClient* _propagation = nullptr;
-    RNS::Bytes _propagationNodeHash;
-    unsigned long _lastSyncAtMs = 0;
-    bool _lastSyncOk = false;
-    int _lastSyncMsgCount = 0;
 
     static LXMFManager* _instance;
 };

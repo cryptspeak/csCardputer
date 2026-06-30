@@ -4,9 +4,9 @@
 #include <functional>
 #include <string>
 
-// A yes/no prompt for the one case LXMF stamps need user input: a peer or
-// propagation node demanding a proof-of-work cost above the configured
-// ceiling (see LXMFManager::setStampConfirmCallback, LXStamper.h). Modeled
+// A yes/no prompt for the one case LXMF stamps need user input: a peer
+// demanding a proof-of-work cost above the configured ceiling (see
+// LXMFManager::setStampConfirmCallback, LXStamper.h). Modeled
 // on HelpOverlay -- same single-overlay-slot mechanism (UIManager::setOverlay),
 // since this can fire while any screen is active, not just Settings/Messages.
 class StampConfirmOverlay : public Screen {

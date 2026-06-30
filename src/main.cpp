@@ -22,7 +22,6 @@
 #include "storage/MessageStore.h"
 #include "reticulum/ReticulumManager.h"
 #include "reticulum/AnnounceManager.h"
-#include "reticulum/PropagationClient.h"
 #include "reticulum/LXMFManager.h"
 #include "transport/WiFiInterface.h"
 #include "transport/TCPClientInterface.h"
@@ -78,8 +77,6 @@ MessageStore messageStore;
 ReticulumManager rns;
 AnnounceManager* announceManager = nullptr;
 RNS::HAnnounceHandler announceHandler;
-PropagationClient* propagationClient = nullptr;
-RNS::HAnnounceHandler propagationAnnounceHandler;
 LXMFManager lxmf;
 WiFiInterface* wifiImpl = nullptr;
 RNS::Interface wifiIface({RNS::Type::NONE});
@@ -1193,8 +1190,8 @@ void setup() {
         ui.markContentDirty();
     });
 
-    // Route transparency — which interface (and whether a propagation node
-    // was used) a send actually went out over. See LXMFManager::RouteInfoCallback.
+    // Route transparency — which interface a send actually went out over.
+    // See LXMFManager::RouteInfoCallback.
     lxmf.setRouteInfoCallback([](const std::string& peerHex, const std::string& routeTag) {
         messageView.notifyRouteInfo(peerHex, routeTag);
         ui.markContentDirty();
@@ -1218,8 +1215,8 @@ void setup() {
     // Register announce handler
     bootScreen.setProgress(0.93f, "Starting discovery...");
     ui.render();
-    // Filter to lxmf.delivery so we don't capture every aspect (lxmf.propagation,
-    // nomadnetwork.node, etc.) from the same peer as separate "doubled" entries.
+    // Filter to lxmf.delivery so we don't capture every aspect (nomadnetwork.node,
+    // etc.) from the same peer as separate "doubled" entries.
     announceManager = new AnnounceManager("lxmf.delivery");
     announceManager->setStorage(&sdStore, &flash);
     announceManager->setLocalDestHash(rns.destination().hash());
@@ -1255,16 +1252,6 @@ void setup() {
     for (const auto& node : announceManager->nodes()) {
         if (node.saved) RNS::Transport::request_path(node.hash);
     }
-
-    // Propagation-node discovery — separate handler/aspect so PN announces
-    // don't get folded into the lxmf.delivery contact list above.
-    propagationClient = new PropagationClient();
-    propagationAnnounceHandler = RNS::HAnnounceHandler(propagationClient);
-    RNS::Transport::register_announce_handler(propagationAnnounceHandler);
-    lxmf.setPropagationClient(propagationClient);
-    // Cross-reference so a PN's operator identity never gets passively
-    // discovered as a regular contact (see AnnounceManager::setPropagationClient).
-    announceManager->setPropagationClient(propagationClient);
 
     if (announceManager->encryptionEnabled()) {
         // Re-save once so any pre-upgrade plaintext contact files and name
@@ -1391,12 +1378,6 @@ void setup() {
     audio.begin();
 
     lxmf.setStampCostCeiling(userConfig.settings().stampCostCeiling);
-    if (userConfig.settings().propagationNodeEnabled
-        && userConfig.settings().propagationNodeHash.length() == 32) {
-        RNS::Bytes pnHash;
-        pnHash.assignHex(userConfig.settings().propagationNodeHash.c_str());
-        lxmf.setPreferredPropagationNode(pnHash);
-    }
 
     // Boot complete
     delay(200);
@@ -1452,7 +1433,6 @@ void setup() {
     settingsScreen.setTCPClients(&tcpClients);
     settingsScreen.setRNS(&rns);
     settingsScreen.setLXMF(&lxmf);
-    settingsScreen.setPropagationClient(propagationClient);
     settingsScreen.setIdentityHash(rns.destinationHashHex());
 #if HAS_GPS
     settingsScreen.setGPS(&gps);

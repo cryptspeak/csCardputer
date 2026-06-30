@@ -32,7 +32,7 @@ most likely to need careful review.
 | [lxmf-messaging.md](lxmf-messaging.md) | `LXMFManager` + `MessageStore` — send/receive flow, delivery proofs/retries, on-disk message format and capacity limits |
 | [announce-discovery.md](announce-discovery.md) | `AnnounceManager` — announce-flood defense layers 2-3, app_data name parsing, the node table, contacts vs. name cache |
 | [lxmf-stamps.md](lxmf-stamps.md) | Anti-spam proof-of-work stamps — `LXStamper`'s streaming-SHA256 feasibility trick, the wire format, background generation, the cost ceiling |
-| [propagation-nodes.md](propagation-nodes.md) | Offline messaging via store-and-forward PNs — `PropagationClient`'s discovery/outbound-fallback/inbound-sync, client-only scope |
+| [propagation-nodes.md](propagation-nodes.md) | Why propagation-node (offline messaging) support was attempted and then removed |
 
 ## Network & hardware
 

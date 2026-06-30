@@ -9,10 +9,9 @@ gating in `sendDirect()`, the background stamp task, `confirmStamping()`)
 
 LXMF's anti-spam stamp is a proof-of-work value a sender attaches to a
 message when the recipient demands one. Before this feature, this
-firmware had no stamp support at all: any peer or propagation node that
-required a stamp (mandatory for propagation submission, optional but
-increasingly common for direct delivery in clients like Sideband and
-NomadNet) silently dropped this device's messages.
+firmware had no stamp support at all: any peer that required a stamp
+(optional but increasingly common for direct delivery in clients like
+Sideband and NomadNet) silently dropped this device's messages.
 
 ## Wire format
 
@@ -20,8 +19,8 @@ NomadNet) silently dropped this device's messages.
 as a 4-element msgpack array (`packContent()`,
 [LXMFMessage.cpp:92](https://github.com/0x00001312/microReticulum/blob/master/src/LXMFMessage.cpp)).
 `fields` is always emitted as an empty fixmap (`0x80`) — real per-field
-support (e.g. `FIELD_TICKET`) wasn't needed for stamps or propagation
-and stays a non-goal for now.
+support (e.g. `FIELD_TICKET`) wasn't needed for stamps and stays a
+non-goal for now.
 
 When a stamp is attached, the array grows to 5 elements:
 `[timestamp, title, content, fields, stamp]`
@@ -35,11 +34,10 @@ the same sender verify identically.
 ## The feasibility problem, and how it's solved here
 
 The reference Python implementation (`LXMF`'s `LXStamper.py`) builds a
-"workblock" — `WORKBLOCK_EXPAND_ROUNDS` (3000 for direct delivery, 1000
-for propagation submission) HKDF rounds × 256 bytes, i.e. ~750KB or
-~250KB — then re-hashes the *entire* workblock plus a random 32-byte
-candidate on **every** brute-force attempt. That's flatly impossible on
-this device's heap (~55KB free, no PSRAM).
+"workblock" — `WORKBLOCK_EXPAND_ROUNDS` (3000) HKDF rounds × 256 bytes,
+i.e. ~750KB — then re-hashes the *entire* workblock plus a random
+32-byte candidate on **every** brute-force attempt. That's flatly
+impossible on this device's heap (~55KB free, no PSRAM).
 
 `LXStamper::Workblock` instead streams the HKDF rounds through one
 `SHA256` instance as they're generated, 256 bytes at a time, never
@@ -71,8 +69,7 @@ on the UI/radio core, and core 0 is the comparatively idle one (see
 [network-interfaces.md](network-interfaces.md)). Request/result are
 each a depth-1 queue (`_stampRequestQueue`/`_stampResultQueue`,
 `xQueueOverwrite`) — only one stamp job is ever in flight, matching
-this device's single-flow design elsewhere (`_outLink`,
-`PropagationClient`'s single submit/sync slots).
+this device's single-flow design elsewhere (`_outLink`).
 
 ```
 sendDirect(msg)
@@ -90,13 +87,6 @@ cost <= ceiling?
                           next sendDirect() pass proceeds as above
               decline  → all STAMPING messages to that peer → FAILED
 ```
-
-The propagation-submission path (`beginPropagationStamping()`) is the
-same task and queues, just with `WORKBLOCK_EXPAND_ROUNDS_PN` (1000, not
-3000) and `StampPurpose::PROPAGATION` so `pollStampResult()` routes the
-finished stamp to `PropagationClient::proceedSubmission()` instead of
-the normal outbound queue — see
-[propagation-nodes.md](propagation-nodes.md).
 
 ## Cost discovery and the ceiling
 

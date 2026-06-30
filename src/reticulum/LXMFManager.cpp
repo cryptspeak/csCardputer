@@ -27,10 +27,9 @@ constexpr unsigned long LXMF_INTERFACE_CORRECTION_WINDOW_MS = 3000;
 // node -- e.g. a multi-interface LoRa gateway bridging to the internet --
 // the request has to make it out over LoRa, get relayed, and the response
 // has to make the same trip back, all at LoRa's airtime/duty-cycle pace;
-// 60s routinely isn't enough, and giving up that fast either fails the
-// message outright or hands it to a propagation node when direct delivery
-// would've worked fine given a few more seconds. ~3 minutes still bounds
-// the wait, just no longer assumes every peer is one hop away.
+// 60s routinely isn't enough, and giving up that fast fails a message that
+// direct delivery would've worked fine given a few more seconds. ~3 minutes
+// still bounds the wait, just no longer assumes every peer is one hop away.
 constexpr int LXMF_DISCOVERY_MAX_ATTEMPTS = 18;
 constexpr unsigned long LXMF_LINK_ESTABLISH_TIMEOUT_MS = 30000;
 
@@ -131,7 +130,6 @@ void LXMFManager::rememberMessageId(const std::string& msgIdHex) {
 void LXMFManager::loop() {
     unsigned long now = millis();
     pollStampResult();
-    if (_propagation) _propagation->loop();
     for (auto it = _pendingProofs.begin(); it != _pendingProofs.end(); ) {
         if ((now - it->second.createdMs) > 65000UL) {
             std::string receiptHash = it->first;
@@ -288,14 +286,11 @@ RNS::Interface LXMFManager::findInterfaceByName(const std::string& name) {
 }
 
 bool LXMFManager::sendDirect(LXMFMessage& msg) {
-    // A direct-delivery stamp grind, or a full propagation-node handoff
-    // (stamp + link + send, see tryPropagationFallback()), is already in
-    // flight for this message -- both are async and self-resolving
-    // (pollStampResult() / onPropagationSubmitDone()), so there's nothing
+    // A direct-delivery stamp grind is already in flight for this message --
+    // it's async and self-resolving (pollStampResult()), so there's nothing
     // for the normal direct-delivery state machine below to do. Checked
-    // first, before identity/path lookups, so it short-circuits every
-    // retry path uniformly (PN handoff can be triggered from more than
-    // one of them).
+    // first, before identity/path lookups, so it short-circuits every retry
+    // path uniformly.
     if (msg.status == LXMFStatus::STAMPING) return false;
 
     // Reset stale link-pending state
@@ -357,7 +352,6 @@ bool LXMFManager::sendDirect(LXMFMessage& msg) {
                           msg.retries, LXMF_DISCOVERY_MAX_ATTEMPTS);
             RNS::Transport::request_path(msg.destHash);
             if (msg.retries >= LXMF_DISCOVERY_MAX_ATTEMPTS) {
-                if (tryPropagationFallback(msg)) return false;
                 Serial.printf("[LXMF] No path for %s after ~%lus — FAILED\n",
                               msg.destHash.toHex().substr(0, 8).c_str(),
                               (unsigned long)LXMF_DISCOVERY_MAX_ATTEMPTS * LXMF_DISCOVERY_RETRY_INTERVAL_MS / 1000UL);
@@ -511,7 +505,6 @@ bool LXMFManager::sendDirect(LXMFMessage& msg) {
                 }
                 msg.retries++;
                 if (msg.retries >= 30) {
-                    if (tryPropagationFallback(msg)) return false;
                     Serial.printf("[LXMF] Link for %s not established after %d retries — FAILED\n",
                                   msg.destHash.toHex().substr(0, 8).c_str(), msg.retries);
                     msg.status = LXMFStatus::FAILED;
@@ -855,127 +848,10 @@ void LXMFManager::beginStamping(LXMFMessage& msg, int targetCost) {
     req.expandRounds = LXStamper::WORKBLOCK_EXPAND_ROUNDS;
 
     msg.status = LXMFStatus::STAMPING;
-    _stampPurpose = StampPurpose::DIRECT;
     _stampInFlight = true;
     Serial.printf("[LXMF] Stamping started for %s, cost=%d\n",
                   msg.destHash.toHex().substr(0, 8).c_str(), targetCost);
     xQueueOverwrite(_stampRequestQueue, &req);
-}
-
-void LXMFManager::beginPropagationStamping(const RNS::Bytes& transientId, int targetCost) {
-    startStampTaskIfNeeded();
-
-    StampReq req;
-    memcpy(req.material, transientId.data(), sizeof(req.material));
-    req.targetCost = targetCost;
-    req.expandRounds = LXStamper::WORKBLOCK_EXPAND_ROUNDS_PN;
-
-    _stampPurpose = StampPurpose::PROPAGATION;
-    _stampInFlight = true;
-    Serial.printf("[LXMF] Propagation stamp started, cost=%d\n", targetCost);
-    xQueueOverwrite(_stampRequestQueue, &req);
-}
-
-void LXMFManager::setPropagationClient(PropagationClient* pc) {
-    _propagation = pc;
-    if (_propagation) {
-        _propagation->setSubmitDoneCallback([this](const RNS::Bytes& recipientHash, bool delivered) {
-            onPropagationSubmitDone(recipientHash, delivered);
-        });
-    }
-}
-
-bool LXMFManager::tryPropagationFallback(LXMFMessage& msg) {
-    if (!_propagation || _propagationNodeHash.size() != 16 || !_rns) return false;
-    // One PN flow (and one stamp job) in flight at a time, same "single
-    // flow" design as direct delivery's _outLink -- a second message
-    // needing the PN just waits its turn rather than failing outright.
-    if (_propagation->submitInFlight() || _stampInFlight) return true;
-
-    RNS::Bytes transientId;
-    int stampCost = 0;
-    auto outcome = _propagation->prepareSubmission(_propagationNodeHash, msg, _rns->identity(),
-                                                     transientId, stampCost);
-    if (outcome != PropagationClient::SubmitOutcome::STARTED) return false;
-
-    // Same stamp-cost gating as direct delivery (sendDirect() above) -- a PN
-    // can advertise an arbitrarily high stamp_cost in its announce, and
-    // unlike direct delivery this path had no ceiling check at all. Brute-
-    // forcing even a handful of bits past the ceiling can take far longer
-    // than is practical on this CPU; without this check that grind would
-    // occupy the single stamp-task/PN-flow slot indefinitely, permanently
-    // blocking every other queued message (PN or direct) behind it and
-    // eventually filling _outQueue with messages that can never send.
-    std::string peerHex = msg.destHash.toHex();
-    if (stampCost > _stampCostCeiling && !_stampApprovedOverCeiling.count(peerHex)) {
-        _propagation->abortSubmission();
-        msg.status = LXMFStatus::STAMPING;
-        if (!_stampAwaitingConfirm.count(peerHex)) {
-            _stampAwaitingConfirm.insert(peerHex);
-            Serial.printf("[LXMF] PN stamp cost %d for %s exceeds ceiling %d -- awaiting confirm\n",
-                          stampCost, peerHex.substr(0, 8).c_str(), _stampCostCeiling);
-            if (_stampConfirmCb) _stampConfirmCb(peerHex, stampCost);
-        }
-        return true;  // keep queued -- confirmStamping() decides FAILED vs proceed
-    }
-
-    msg.status = LXMFStatus::STAMPING;
-    Serial.printf("[LXMF] No direct route to %s -- handing off to propagation node (stamp cost=%d)\n",
-                  msg.destHash.toHex().substr(0, 8).c_str(), stampCost);
-    if (stampCost > 0) {
-        beginPropagationStamping(transientId, stampCost);
-    } else {
-        _propagation->proceedSubmission(RNS::Bytes());
-    }
-    return true;
-}
-
-void LXMFManager::onPropagationSubmitDone(const RNS::Bytes& recipientHash, bool delivered) {
-    for (auto it = _outQueue.begin(); it != _outQueue.end(); ++it) {
-        if (it->destHash != recipientHash || it->status != LXMFStatus::STAMPING) continue;
-        std::string peerHex = recipientHash.toHex();
-        LXMFMessage msg = *it;
-        // Handing off to a PN means "sent," not "delivered" -- the
-        // recipient still has to pull it down themselves. Matches the
-        // distinction already drawn for direct delivery (SENT vs DELIVERED).
-        msg.status = delivered ? LXMFStatus::SENT : LXMFStatus::FAILED;
-        Serial.printf("[LXMF] PN handoff for %s: %s\n",
-                      peerHex.substr(0, 8).c_str(), delivered ? "SENT" : "FAILED");
-        if (delivered && _routeInfoCb) {
-            std::string tag = "PN/" + shortIfaceTag(RNS::Transport::next_hop_interface(_propagationNodeHash));
-            _routeInfoCb(peerHex, tag);
-        }
-        if (_store) {
-            if (msg.savedCounter > 0) _store->updateMessageStatusByCounter(peerHex, msg.savedCounter, false, msg.status);
-            else _store->updateMessageStatus(peerHex, msg.timestamp, false, msg.status);
-        }
-        if (_statusCb) _statusCb(peerHex, msg.timestamp, msg.status);
-        _outQueue.erase(it);
-        break;
-    }
-}
-
-bool LXMFManager::syncPropagationNode() {
-    if (!_propagation || _propagationNodeHash.size() != 16 || !_rns) return false;
-    return _propagation->startSync(_propagationNodeHash, _rns->identity(),
-        [this](const uint8_t* data, size_t len) { onPropagationMessageDecoded(data, len); },
-        [this](bool ok, int count) {
-            Serial.printf("[LXMF] PN sync finished: ok=%d, %d message(s)\n", ok, count);
-            _lastSyncAtMs = millis();
-            _lastSyncOk = ok;
-            _lastSyncMsgCount = count;
-        });
-}
-
-bool LXMFManager::propagationSyncInFlight() const {
-    return _propagation && _propagation->syncInFlight();
-}
-
-void LXMFManager::onPropagationMessageDecoded(const uint8_t* data, size_t len) {
-    // Already the full [dest:16][src:16][sig:64][msgpack] shape (see
-    // PropagationClient's DecodedMessageCallback contract) -- same as
-    // link delivery, so no destHash override needed.
-    processIncoming(data, len, RNS::Bytes());
 }
 
 void LXMFManager::pollStampResult() {
@@ -984,18 +860,6 @@ void LXMFManager::pollStampResult() {
     StampRes res;
     if (xQueueReceive(_stampResultQueue, &res, 0) != pdTRUE) return;
     _stampInFlight = false;
-
-    if (_stampPurpose == StampPurpose::PROPAGATION) {
-        if (_propagation) {
-            if (res.ok) {
-                _propagation->proceedSubmission(RNS::Bytes(res.stamp, sizeof(res.stamp)));
-            } else {
-                Serial.println("[LXMF] Propagation stamp FAILED");
-                _propagation->abortSubmission();
-            }
-        }
-        return;
-    }
 
     for (auto it = _outQueue.begin(); it != _outQueue.end(); ++it) {
         LXMFMessage& msg = *it;
@@ -1030,13 +894,13 @@ void LXMFManager::confirmStamping(const std::string& peerHex, bool proceed) {
         _stampApprovedOverCeiling.insert(peerHex);
         // sendDirect() bails immediately on any STAMPING-status message
         // (see its top-of-function guard) -- that's correct while a grind
-        // or PN handoff is actually in flight, but the messages parked here
-        // were only marked STAMPING to *hold* them during the confirm
-        // prompt, with nothing in flight yet. Reset to QUEUED so the next
-        // loop() pass actually re-enters stamp gating, sees this peer now
-        // in _stampApprovedOverCeiling, and proceeds (beginStamping() or
-        // tryPropagationFallback()) -- without this they'd sit in _outQueue
-        // forever, occupying a slot and never sending.
+        // is actually in flight, but the messages parked here were only
+        // marked STAMPING to *hold* them during the confirm prompt, with
+        // nothing in flight yet. Reset to QUEUED so the next loop() pass
+        // actually re-enters stamp gating, sees this peer now in
+        // _stampApprovedOverCeiling, and proceeds (beginStamping()) --
+        // without this they'd sit in _outQueue forever, occupying a slot
+        // and never sending.
         for (auto& msg : _outQueue) {
             if (msg.destHash.toHex() != peerHex || msg.status != LXMFStatus::STAMPING) continue;
             msg.status = LXMFStatus::QUEUED;

@@ -13,7 +13,6 @@
 class SDStore;
 class FlashStore;
 class LoRaInterface;
-class PropagationClient;
 
 struct DiscoveredNode {
     RNS::Bytes hash;
@@ -50,11 +49,6 @@ public:
     void setStorage(SDStore* sd, FlashStore* flash);
     void setLocalDestHash(const RNS::Bytes& hash) { _localDestHash = hash; }
     void setLoRaInterface(LoRaInterface* li) { _loraIf = li; }
-    // So a PN's operator identity (e.g. a NomadNet node with propagation
-    // enabled, which announces lxmf.propagation AND lxmf.delivery under the
-    // same identity) never gets passively discovered as a regular contact
-    // here -- it belongs exclusively in the Propagation Node picker.
-    void setPropagationClient(PropagationClient* pc) { _propagation = pc; }
 
     // ── At-rest encryption ──────────────────────────────────────────────
     // Provide the loaded RNS::Identity (with private key) so contact files
@@ -136,7 +130,6 @@ private:
     SDStore* _sd = nullptr;
     FlashStore* _flash = nullptr;
     LoRaInterface* _loraIf = nullptr;
-    PropagationClient* _propagation = nullptr;
     const RNS::Identity* _identity = nullptr;
     RNS::Bytes _localDestHash;
     bool _contactsDirty = false;
