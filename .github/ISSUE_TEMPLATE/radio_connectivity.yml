@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: Firmware version
-      description: "Find this on the Home screen (bottom bar) or in Settings. Latest release: **v0.1.1** — if you're on an older version, please update first and check if the issue still occurs."
-      placeholder: "e.g. v0.1.1"
+      description: "Find this on the Home screen (bottom bar) or in Settings. Latest release: **v0.1.2** — if you're on an older version, please update first and check if the issue still occurs."
+      placeholder: "e.g. v0.1.2"
     validations:
       required: true
 
