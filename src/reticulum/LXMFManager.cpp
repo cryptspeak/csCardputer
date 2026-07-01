@@ -5,6 +5,7 @@
 #include <time.h>
 #include <algorithm>
 #include <cstring>
+#include <new>
 
 LXMFManager* LXMFManager::_instance = nullptr;
 std::map<std::string, LXMFManager::PendingProof> LXMFManager::_pendingProofs;
@@ -415,6 +416,17 @@ bool LXMFManager::sendDirect(LXMFMessage& msg) {
         int cost = stampCostFromAppData(RNS::Identity::recall_app_data(msg.destHash));
         if (cost > 0) {
             std::string peerHex = msg.destHash.toHex();
+            // Hard ceiling: costs above STAMP_HARD_MAX are not feasible on this
+            // hardware within the abort timeout.  Fail the message immediately
+            // rather than burning minutes of CPU or crashing under heap pressure.
+            if (cost > STAMP_HARD_MAX) {
+                Serial.printf("[LXMF] Stamp cost %d for %s exceeds hardware limit %d -- dropping\n",
+                              cost, peerHex.substr(0, 8).c_str(), STAMP_HARD_MAX);
+                if (_store) _store->updateMessageStatus(peerHex, msg.timestamp, false, LXMFStatus::FAILED);
+                if (_statusCb) _statusCb(peerHex, msg.timestamp, LXMFStatus::FAILED);
+                msg.status = LXMFStatus::FAILED;
+                return true;
+            }
             if (cost > _stampCostCeiling && !_stampApprovedOverCeiling.count(peerHex)) {
                 msg.status = LXMFStatus::STAMPING;
                 if (!_stampAwaitingConfirm.count(peerHex)) {
@@ -801,7 +813,7 @@ void LXMFManager::startStampTaskIfNeeded() {
     // does no filesystem or radio I/O, so there's no shared-mutex reason to
     // stay on the UI/radio core -- core 0 is the comparatively idle one
     // (see network-interfaces.md), so this genuinely runs in parallel.
-    xTaskCreatePinnedToCore(stampTaskFunc, "lxmf_stamp", 4096, this, 1, &_stampTask, 0);
+    xTaskCreatePinnedToCore(stampTaskFunc, "lxmf_stamp", 8192, this, 1, &_stampTask, 0);
 }
 
 void LXMFManager::stampTaskFunc(void* param) {
@@ -810,20 +822,28 @@ void LXMFManager::stampTaskFunc(void* param) {
         StampReq req;
         if (xQueueReceive(self->_stampRequestQueue, &req, portMAX_DELAY) != pdTRUE) continue;
 
-        RNS::Bytes material(req.material, sizeof(req.material));
-        uint32_t attempts = 0;
-        RNS::Bytes stamp = LXStamper::generateStamp(material, req.targetCost, req.expandRounds,
-                                                     nullptr, &attempts);
-
         StampRes res;
         memcpy(res.material, req.material, sizeof(res.material));
-        if (stamp.size() == LXStamper::STAMP_SIZE) {
-            memcpy(res.stamp, stamp.data(), sizeof(res.stamp));
-            res.ok = 1;
-        } else {
-            res.ok = 0;
+        memset(res.stamp, 0, sizeof(res.stamp));
+        res.ok = 0;
+
+        try {
+            RNS::Bytes material(req.material, sizeof(req.material));
+            uint32_t attempts = 0;
+            unsigned long deadline = req.startMs + STAMP_TIMEOUT_MS;
+            auto shouldAbort = [deadline]() -> bool { return millis() > deadline; };
+            RNS::Bytes stamp = LXStamper::generateStamp(material, req.targetCost, req.expandRounds,
+                                                         shouldAbort, &attempts);
+            if (stamp.size() == LXStamper::STAMP_SIZE) {
+                memcpy(res.stamp, stamp.data(), sizeof(res.stamp));
+                res.ok = 1;
+            }
+            Serial.printf("[LXMF] Stamp %s after %u attempts\n", res.ok ? "found" : "FAILED", (unsigned)attempts);
+        } catch (const std::bad_alloc&) {
+            Serial.println("[LXMF] Stamp: out of memory — marking failed");
+        } catch (...) {
+            Serial.println("[LXMF] Stamp: unexpected exception — marking failed");
         }
-        Serial.printf("[LXMF] Stamp %s after %u attempts\n", res.ok ? "found" : "FAILED", (unsigned)attempts);
         xQueueOverwrite(self->_stampResultQueue, &res);
     }
 }
@@ -846,6 +866,7 @@ void LXMFManager::beginStamping(LXMFMessage& msg, int targetCost) {
     memcpy(req.material, msg.messageId.data(), sizeof(req.material));
     req.targetCost = targetCost;
     req.expandRounds = LXStamper::WORKBLOCK_EXPAND_ROUNDS;
+    req.startMs = millis();
 
     msg.status = LXMFStatus::STAMPING;
     _stampInFlight = true;

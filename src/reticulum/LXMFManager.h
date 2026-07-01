@@ -152,7 +152,19 @@ private:
     // own low-priority task on core 0 so it never blocks the main loop
     // (radio/UI, core 1), exactly one job in flight at a time, matching this
     // device's "one peer/one flow at a time" design elsewhere (see _outLink).
-    struct StampReq { uint8_t material[32]; int targetCost; int expandRounds; };
+    // Hard limit: never attempt a stamp whose cost exceeds this regardless of
+    // ceiling or user approval.  ESP32-S3 feasibility ceiling — cost 16 → ~65K
+    // expected attempts (~0.5 s); cost 17 → 2× that; exponential beyond here.
+    static constexpr int STAMP_HARD_MAX = 16;
+    // Background task aborts and marks the message FAILED after this many ms.
+    static constexpr unsigned long STAMP_TIMEOUT_MS = 30000;
+
+    struct StampReq {
+        uint8_t material[32];
+        int targetCost;
+        int expandRounds;
+        unsigned long startMs;  // wall-clock start time for abort timeout
+    };
     struct StampRes { uint8_t material[32]; uint8_t stamp[32]; uint8_t ok; };
 
     void startStampTaskIfNeeded();

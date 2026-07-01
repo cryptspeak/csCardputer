@@ -73,10 +73,11 @@ void UserConfig::sanitizeSettings() {
     _settings.manualUtcOffsetHours = constrain(_settings.manualUtcOffsetHours, -12, 14);
     _settings.autoIfaceMaxPeers = constrain(_settings.autoIfaceMaxPeers, 1, 16);
 
-    // 1 (trivial) .. 24 (multi-minute grind, see LXStamper.h) -- 0 would mean
-    // "never auto-generate," which isn't a real option here since cost>0 from
-    // a peer always means *some* stamp is required.
-    _settings.stampCostCeiling = constrain(_settings.stampCostCeiling, 1, 24);
+    // 1 (trivial) .. 16 (STAMP_HARD_MAX, see LXMFManager.h) -- clamped to the
+    // hardware feasibility ceiling.  0 would mean "never auto-generate," which
+    // isn't a real option here since cost>0 from a peer always means *some*
+    // stamp is required.
+    _settings.stampCostCeiling = constrain(_settings.stampCostCeiling, 1, 16);
 
     // Auto-lock is a fixed preset list (see SettingsScreen's kAutoLockOptions)
     // — snap anything else (corrupted config, future-removed preset) to off
