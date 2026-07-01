@@ -79,7 +79,7 @@ private:
     // can share one popup instance instead of one bespoke modal each.
     enum PopupPurpose { POPUP_NONE, POPUP_WIFI_MODE, POPUP_DURESS_ACTION,
                          POPUP_AUDIO, POPUP_TIME_SOURCE, POPUP_AUTO_LAN,
-                         POPUP_THEME_INPUT, POPUP_AUTOLOCK };
+                         POPUP_THEME_INPUT, POPUP_AUTOLOCK, POPUP_REBOOT_CONFIRM };
 
     void buildMainMenu();
     void buildMessagingMenu();

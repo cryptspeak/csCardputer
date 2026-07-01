@@ -170,8 +170,8 @@ void SettingsScreen::onPopupConfirmed(int result) {
         case POPUP_WIFI_MODE:
             s.wifiMode = (RatWiFiMode)result;
             applyAndSave();
-            showToast("Reboot to apply");
             buildWiFiMenu();
+            openPopup(POPUP_REBOOT_CONFIRM, "Reboot to apply?", {"Reboot now", "Later"}, 0);
             break;
 
         case POPUP_DURESS_ACTION: {
@@ -207,8 +207,8 @@ void SettingsScreen::onPopupConfirmed(int result) {
             // on next reboot — same as before this was a popup.
             s.autoIfaceEnabled = (result == 0);
             applyAndSave();
-            showToast("Reboot to apply");
             buildWiFiMenu();
+            openPopup(POPUP_REBOOT_CONFIRM, "Reboot to apply?", {"Reboot now", "Later"}, 0);
             break;
 
         case POPUP_THEME_INPUT:
@@ -222,6 +222,10 @@ void SettingsScreen::onPopupConfirmed(int result) {
                 applyAndSave();
                 buildSecurityMenu();
             }
+            break;
+
+        case POPUP_REBOOT_CONFIRM:
+            if (result == 0) ESP.restart();
             break;
 
         default:
