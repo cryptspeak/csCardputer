@@ -8,6 +8,7 @@ void NodesScreen::onEnter() {
 
 void NodesScreen::onExit() {
     _showingActions = false;
+    _showingAddress = false;
 }
 
 // Helper: truncate name to maxChars respecting UTF-8 boundaries
@@ -87,15 +88,19 @@ void NodesScreen::refreshList() {
         }
     }
 
-    // Sort: letters before numbers, then alphabetical
-    auto sortFn = [](const SortEntry& a, const SortEntry& b) {
+    // Contacts: letters before numbers, then alphabetical
+    auto sortAlpha = [](const SortEntry& a, const SortEntry& b) {
         bool aDigit = !a.lower.empty() && a.lower[0] >= '0' && a.lower[0] <= '9';
         bool bDigit = !b.lower.empty() && b.lower[0] >= '0' && b.lower[0] <= '9';
         if (aDigit != bDigit) return bDigit;
         return a.lower < b.lower;
     };
-    std::sort(contacts.begin(), contacts.end(), sortFn);
-    std::sort(peers.begin(), peers.end(), sortFn);
+    // Peers: most-recently-heard first so active nodes float to the top
+    auto sortByTime = [&nodes](const SortEntry& a, const SortEntry& b) {
+        return nodes[a.idx].lastSeen > nodes[b.idx].lastSeen;
+    };
+    std::sort(contacts.begin(), contacts.end(), sortAlpha);
+    std::sort(peers.begin(), peers.end(), sortByTime);
 
     _lastKnownCount = (int)nodes.size();
     int newSelectedIdx = 0;
@@ -179,6 +184,7 @@ void NodesScreen::showActionMenu(int nodeIdx) {
             _actionList.addItem("Save Contact");
         }
     }
+    _actionList.addItem("Show Address");
     _actionList.addItem("Back");
     _actionList.setSelected(0);
 
@@ -201,6 +207,9 @@ void NodesScreen::executeAction(int actionIdx) {
         if (_saveCb) _saveCb(_selectedNodeHash, false);
         exitActionMenu();
         refreshList();
+    } else if (action == "Show Address") {
+        _showingActions = false;
+        _showingAddress = true;
     } else {
         exitActionMenu();
     }
@@ -208,6 +217,7 @@ void NodesScreen::executeAction(int actionIdx) {
 
 void NodesScreen::exitActionMenu() {
     _showingActions = false;
+    _showingAddress = false;
     _selectedNodeIdx = -1;
 }
 
@@ -219,7 +229,41 @@ void NodesScreen::render(M5Canvas& canvas) {
 
     int y = Theme::CONTENT_Y;
 
-    if (_showingActions) {
+    if (_showingAddress) {
+        // Header: peer name with blue accent
+        const int headerH = Theme::SECTION_HEADER_H;
+        canvas.fillRect(0, y, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
+        canvas.fillRect(0, y + 2, 3, headerH - 4, Theme::PRIMARY);
+        Theme::useUiFont(canvas);
+        canvas.setTextColor(Theme::TEXT_PRIMARY);
+        canvas.drawString(truncUTF8(_selectedNodeName, 26).c_str(), 8, y + 2);
+        y += headerH + 2;
+        canvas.drawFastHLine(0, y, Theme::SCREEN_W, Theme::DIVIDER);
+        y += 4;
+
+        Theme::useSmallFont(canvas);
+        canvas.setTextColor(Theme::MUTED);
+        canvas.drawString("LXMF Address:", 4, y);
+        y += Theme::CHAR_H + 3;
+
+        // Format 32-char hash as two lines of "abcd ef01 2345 6789"
+        char addr1[24] = {}, addr2[24] = {};
+        if (_selectedNodeHash.size() >= 32) {
+            const char* h = _selectedNodeHash.c_str();
+            snprintf(addr1, sizeof(addr1), "%.4s %.4s %.4s %.4s", h, h+4, h+8, h+12);
+            snprintf(addr2, sizeof(addr2), "%.4s %.4s %.4s %.4s", h+16, h+20, h+24, h+28);
+        } else {
+            snprintf(addr1, sizeof(addr1), "%s", _selectedNodeHash.c_str());
+        }
+        canvas.setTextColor(Theme::TEXT_PRIMARY);
+        canvas.drawString(addr1, 4, y);
+        y += Theme::CHAR_H + 1;
+        if (addr2[0]) canvas.drawString(addr2, 4, y);
+        y += Theme::CHAR_H + 6;
+
+        canvas.setTextColor(Theme::MUTED);
+        canvas.drawString("any key to close", 4, y);
+    } else if (_showingActions) {
         const int headerH = Theme::SECTION_HEADER_H;
         canvas.fillRect(0, y, Theme::CONTENT_W, headerH, Theme::BG_SURFACE);
         canvas.fillRect(0, y + 2, 3, headerH - 4, Theme::PRIMARY);
@@ -280,6 +324,11 @@ void NodesScreen::render(M5Canvas& canvas) {
 }
 
 bool NodesScreen::handleKey(const KeyEvent& event) {
+    if (_showingAddress) {
+        _showingAddress = false;
+        return true;
+    }
+
     if (_showingActions) {
         // ESC or Delete exits action menu
         if (event.character == 27 || event.del) {

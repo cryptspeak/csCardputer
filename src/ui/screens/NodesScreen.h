@@ -40,6 +40,7 @@ private:
 
     // Action menu state
     bool _showingActions = false;
+    bool _showingAddress = false;
     ScrollList _actionList;
     int _selectedNodeIdx = -1;
     std::string _selectedNodeName;

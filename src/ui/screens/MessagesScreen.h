@@ -51,4 +51,9 @@ private:
     ScrollList _contextList;
     std::string _contextPeerHex;
     bool _contextIsContact = false;
+
+    // Address display panel (triggered from context menu)
+    bool _showingAddress = false;
+    std::string _addressPeerHex;
+    std::string _addressPeerName;
 };
