@@ -1,0 +1,137 @@
+name: Radio / Connectivity Issue
+description: Problems with LoRa, WiFi, TCP, or Reticulum peer discovery
+labels: ["connectivity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Radio and networking issues are much easier to diagnose with your exact settings and a serial log. Fill in what you can.
+
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: "Find this on the Home screen (bottom bar) or in Settings. Latest release: **v0.1.1** — if you're on an older version, please update first and check if the issue still occurs."
+      placeholder: "e.g. v0.1.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: What kind of connectivity issue is this?
+      options:
+        - LoRa — no peers visible / not receiving announcements
+        - LoRa — device not transmitting (no TX activity)
+        - LoRa — intermittent drops / poor range
+        - WiFi — can't connect to AP (STA mode)
+        - WiFi — AP mode not working
+        - TCP — can't reach hub / TCP interface not connecting
+        - Reticulum — peers visible but messages not delivering
+        - Reticulum — stuck "linking" / delivery never completes
+        - AutoInterface — not finding peers on local network
+        - Multiple / other (describe below)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: interfaces_enabled
+    attributes:
+      label: Interfaces enabled on your device
+      description: Check all that apply (Settings → Radio / Settings → Network).
+      options:
+        - label: LoRa
+        - label: WiFi — AP mode
+        - label: WiFi — STA mode (connecting to existing network)
+        - label: TCP client (connecting to a Reticulum hub)
+        - label: AutoInterface (local UDP broadcast)
+
+  - type: markdown
+    attributes:
+      value: "### LoRa settings (skip if LoRa is not involved)"
+
+  - type: input
+    id: frequency
+    attributes:
+      label: Frequency (MHz)
+      placeholder: "e.g. 915.0"
+
+  - type: input
+    id: spreading_factor
+    attributes:
+      label: Spreading Factor (SF)
+      placeholder: "e.g. 7"
+
+  - type: input
+    id: bandwidth
+    attributes:
+      label: Bandwidth (kHz)
+      placeholder: "e.g. 125"
+
+  - type: input
+    id: coding_rate
+    attributes:
+      label: Coding Rate (CR)
+      placeholder: "e.g. 5"
+
+  - type: input
+    id: tx_power
+    attributes:
+      label: TX Power (dBm)
+      placeholder: "e.g. 17"
+
+  - type: markdown
+    attributes:
+      value: "### Network / peer details"
+
+  - type: textarea
+    id: other_nodes
+    attributes:
+      label: Other Reticulum nodes in your setup
+      description: e.g. "RNode on 915 MHz SF7 BW125" or "Reticulum on a Raspberry Pi via TCP". Helps narrow down whether the issue is on the Cardputer side or the peer side.
+      placeholder: |
+        - Device type, interface, settings
+        - Whether those devices can reach each other without the Cardputer
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / what you've tried
+      placeholder: |
+        1. Powered on device
+        2. Set frequency to 915 MHz, SF7, BW125, CR5, 17 dBm
+        3. Opened Nodes screen — no peers appear
+        4. Waited 5 minutes — still nothing
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "e.g. My RNode on the same frequency/SF/BW should show up in the Nodes list"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happens?
+      placeholder: "e.g. Nodes screen stays empty, no announce activity in serial log"
+    validations:
+      required: true
+
+  - type: textarea
+    id: serial_log
+    attributes:
+      label: Serial log output
+      description: |
+        Connect via USB, open a serial monitor at **115200 baud**, and paste output here. Look for lines with `[RNS]`, `[LXMF]`, `[LoRa]`, `[WiFi]`, `[TCP]`, `Interface`, or `Transport`. Even a few seconds at startup helps.
+      render: text
+      placeholder: "Paste serial output here..."
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Antenna setup, distance between nodes, local RF environment, obstacles — anything that might be relevant.

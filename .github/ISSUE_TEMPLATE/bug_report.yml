@@ -1,0 +1,115 @@
+name: Bug Report
+description: Something isn't working right — crashes, wrong behavior, data issues, UI problems
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in what you can — the more context you provide, the easier it is to track down. Nothing here except the firmware version and the description of the bug is strictly required.
+
+        > **Encryption or data-loss issue?** If your bug involves lost messages, a corrupt identity, an unexpected wipe, or anything that could be a security vulnerability, please use [GitHub's private vulnerability reporting](https://github.com/cryptspeak/csCardputer/security/advisories/new) instead of a public issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: "Find this on the Home screen (bottom bar) or in Settings. Latest release: **v0.1.1** — if you're on an older version, please update first and check if the issue still occurs."
+      placeholder: "e.g. v0.1.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: flash_method
+    attributes:
+      label: How did you flash the firmware?
+      options:
+        - Web Flasher (cryptspeak.github.io/webFlasher)
+        - PlatformIO (pio run -t upload)
+        - Other (describe below)
+
+  - type: checkboxes
+    id: hardware
+    attributes:
+      label: Hardware
+      options:
+        - label: SD card inserted
+        - label: Running on battery (not USB)
+
+  - type: dropdown
+    id: boot_state
+    attributes:
+      label: Device state when the bug occurred
+      options:
+        - First boot / setup (setting password for the first time)
+        - Password unlock screen
+        - Just after unlock (loading home screen)
+        - Normal use (already unlocked)
+        - Not sure
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area affected
+      options:
+        - Boot / password screen
+        - Home screen
+        - Messages / conversations
+        - Contacts / peer discovery
+        - Settings
+        - Radio / LoRa
+        - Network (WiFi / TCP)
+        - Encryption / identity / data on disk
+        - Duress password / auto-lock
+        - Multiple areas
+        - Not sure
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Walk us through what you did. If you can't reproduce it reliably, describe what you were doing when it happened.
+      placeholder: |
+        1. Power on device
+        2. Enter password at unlock screen
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: "e.g. Message appears in the conversation view"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      placeholder: "e.g. Screen went blank and the device rebooted"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: Reproducibility
+      options:
+        - Always
+        - Sometimes
+        - Only happened once
+
+  - type: textarea
+    id: serial_log
+    attributes:
+      label: Serial log output
+      description: |
+        Connect via USB and open a serial monitor at **115200 baud** before reproducing the bug. Paste relevant output here — especially lines with `[E]`, `panic`, `assert`, `Guru Meditation`, or stack traces. If you can't capture it, leave this blank.
+      render: text
+      placeholder: "Paste serial output here..."
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?

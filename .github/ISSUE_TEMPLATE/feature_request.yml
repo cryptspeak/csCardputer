@@ -1,0 +1,23 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are welcome in any form — a concrete proposal, a rough idea, or something you'd like to see that makes the device more useful. Open it and we can go from there.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: Describe what you have in mind. A use case, a proposed solution, prior art you've seen elsewhere — whatever context helps.
+      placeholder: "e.g. A way to delete individual messages from a conversation."
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Mockups, related issues, links, or additional context.
