@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <functional>
 #include "config/Config.h"
@@ -67,6 +68,10 @@ public:
     std::string lookupName(const std::string& hexHash) const;
     void saveNameCache();
     void loadNameCache();
+    // Mark a peer's cache entry as persistent so it is always included in the
+    // on-disk names.json even when a TCP hub has flooded more named peers than
+    // MAX_NAME_CACHE. Called by LXMFManager on every inbound/outbound message.
+    void markNamePersistent(const std::string& hexHash);
 
     // Node list access
     const std::vector<DiscoveredNode>& nodes() const { return _nodes; }
@@ -143,6 +148,10 @@ private:
     unsigned long _lastContactSave = 0;
     unsigned long _lastNameCacheSave = 0;
     mutable std::map<std::string, std::string> _nameCache;  // hexHash → displayName
+    // Entries that must survive the MAX_NAME_CACHE cap when writing names.json:
+    // loaded from disk at boot (loadNameCache) + peers we've exchanged messages
+    // with (markNamePersistent). Never evicted by received_announce().
+    std::set<std::string> _persistentCacheKeys;
     unsigned long _globalAnnounceWindowStart = 0;
     unsigned int _globalAnnounceCount = 0;
     static constexpr unsigned int MAX_GLOBAL_ANNOUNCES_PER_SEC = 8;

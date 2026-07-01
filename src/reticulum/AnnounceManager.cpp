@@ -267,6 +267,21 @@ void AnnounceManager::received_announce(
         evictStale(300000);  // 5 min TTL under pressure (normally 1 hour)
     }
 
+    // RAM guard: if a TCP hub has flooded the name cache far past the on-disk
+    // cap, evict non-persistent entries to keep memory bounded. Persistent
+    // entries (loaded at boot or from peers we've chatted with) are never
+    // removed here — only hub-flooded transient ones are trimmed.
+    if ((int)_nameCache.size() > MAX_NAME_CACHE * 3) {
+        for (auto it2 = _nameCache.begin();
+             it2 != _nameCache.end() && (int)_nameCache.size() > MAX_NAME_CACHE * 2; ) {
+            if (!_persistentCacheKeys.count(it2->first)) {
+                it2 = _nameCache.erase(it2);
+            } else {
+                ++it2;
+            }
+        }
+    }
+
     std::string key = makeKey(destination_hash);
     unsigned long now = millis();
     uint8_t hops = RNS::Transport::hops_to(destination_hash);
@@ -281,9 +296,6 @@ void AnnounceManager::received_announce(
             bumpNameVersion();
             std::string destHex = destination_hash.toHex();
             _nameCache[destHex] = name;
-            while ((int)_nameCache.size() > MAX_NAME_CACHE) {
-                _nameCache.erase(_nameCache.begin());
-            }
             _nameCacheDirty = true;
         }
         node.lastSeen = now;
@@ -343,9 +355,6 @@ void AnnounceManager::received_announce(
     if (!name.empty()) bumpNameVersion();
     if (!name.empty()) {
         _nameCache[destHex] = name;
-        while ((int)_nameCache.size() > MAX_NAME_CACHE) {
-            _nameCache.erase(_nameCache.begin());
-        }
         _nameCacheDirty = true;
     }
     // Skip identityHex for non-contacts (saves ~64 bytes per node)
@@ -468,10 +477,47 @@ void AnnounceManager::clearAll() {
     _nodes.clear();
     _hashIndex.clear();
     _nameCache.clear();
+    _persistentCacheKeys.clear();
     _contactsDirty = false;
     _nameCacheDirty = false;
     _lastNameCacheSave = 0;
     Serial.println("[ANNOUNCE] Cleared all nodes and name cache");
+}
+
+void AnnounceManager::markNamePersistent(const std::string& hexHash) {
+    _persistentCacheKeys.insert(hexHash);
+
+    // If the name was evicted from _nameCache by the TCP-hub RAM guard before
+    // this peer was involved in a message exchange, recover it now so the next
+    // saveNameCache() can write it to disk. Without this, saveNameCache() loops
+    // over _persistentCacheKeys, finds no _nameCache entry for this hash, and
+    // silently omits the name from names.json — making it disappear after reboot.
+    if (_nameCache.count(hexHash)) { _nameCacheDirty = true; return; }
+
+    // Try live node list first (O(1) via index, no allocation)
+    const DiscoveredNode* node = findNodeByHex(hexHash);
+    if (node && !node->name.empty()) {
+        std::string prefix12 = node->hash.toHex().substr(0, 12);
+        if (node->name != prefix12) {
+            _nameCache[hexHash] = node->name;
+            _nameCacheDirty = true;
+            return;
+        }
+    }
+
+    // Fall back to the RNS protocol's own persisted identity cache. Every peer
+    // we have a path to has had at least one announce validated by Transport,
+    // which stores the announce app_data in known_destinations — independently
+    // of our own name cache and loaded at boot from LittleFS.
+    if (hexHash.length() == RNS::Type::Reticulum::TRUNCATED_HASHLENGTH / 8 * 2) {
+        RNS::Bytes hash;
+        hash.assignHex(hexHash.c_str());
+        std::string recalled = extractDisplayName(RNS::Identity::recall_app_data(hash));
+        if (!recalled.empty()) {
+            _nameCache[hexHash] = recalled;
+            _nameCacheDirty = true;
+        }
+    }
 }
 
 void AnnounceManager::rebuildIndex() {
@@ -656,14 +702,13 @@ void AnnounceManager::saveContacts() {
 
 void AnnounceManager::loop() {
     unsigned long now = millis();
+    // Let saveContacts/saveNameCache manage _dirty themselves (they re-set the
+    // flag on heap-pressure deferral), so we only update _lastSave here.
     if (_contactsDirty && now - _lastContactSave >= CONTACT_SAVE_INTERVAL_MS) {
-        _contactsDirty = false;
         _lastContactSave = now;
         saveContacts();
-        Serial.println("[ANNOUNCE] Deferred contact save complete");
     }
     if (_nameCacheDirty && now - _lastNameCacheSave >= NAME_CACHE_SAVE_INTERVAL_MS) {
-        _nameCacheDirty = false;
         _lastNameCacheSave = now;
         saveNameCache();
     }
@@ -674,7 +719,17 @@ std::string AnnounceManager::lookupName(const std::string& hexHash) const {
     // deliberate user choice, see addManualContact()/saveNode()) and any
     // peer already discovered this session.
     const DiscoveredNode* node = findNodeByHex(hexHash);
-    if (node && !node->name.empty()) return node->name;
+    if (node && !node->name.empty()) {
+        // Saved contacts: always return the stored name — it's a deliberate choice.
+        // For non-contacts, only return the name if it came from an announce.
+        // notePeerInterface() assigns a 12-char truncated hex fallback when a peer
+        // messages us before announcing; that should not block recall_app_data() from
+        // returning the real display name from persistence.
+        if (node->saved) return node->name;
+        std::string prefix12 = node->hash.toHex().substr(0, 12);
+        if (node->name != prefix12) return node->name;
+        // name is the auto-generated fallback — fall through to recall_app_data()
+    }
 
     // RNS::Identity::recall_app_data() is the protocol's own persisted
     // record of the last announce app_data validated for this destination --
@@ -726,9 +781,24 @@ void AnnounceManager::saveNameCache() {
         return;
     }
     JsonDocument doc;
-    for (auto& kv : _nameCache) {
-        doc[kv.first] = kv.second;
+
+    // Always write persistent entries first (names loaded at boot or from peers
+    // we've exchanged messages with). These must survive even if a TCP hub has
+    // flooded more named peers than MAX_NAME_CACHE.
+    for (const auto& hexHash : _persistentCacheKeys) {
+        auto it = _nameCache.find(hexHash);
+        if (it != _nameCache.end()) doc[hexHash] = it->second;
     }
+
+    // Fill remaining slots up to MAX_NAME_CACHE with non-persistent entries
+    // (hub-flooded peers that don't need to survive a reboot).
+    for (const auto& kv : _nameCache) {
+        if ((int)doc.size() >= MAX_NAME_CACHE) break;
+        if (!_persistentCacheKeys.count(kv.first)) {
+            doc[kv.first] = kv.second;
+        }
+    }
+
     String json;
     serializeJson(doc, json);
     String envelope = maybeEncryptContact(_identity, json);
@@ -740,7 +810,9 @@ void AnnounceManager::saveNameCache() {
         _flash->ensureDir("/config");
         _flash->writeString("/config/names.json", envelope);
     }
-    Serial.printf("[ANNOUNCE] Name cache saved (%d entries)\n", (int)_nameCache.size());
+    Serial.printf("[ANNOUNCE] Name cache saved (%d entries, %d persistent)\n",
+                  (int)doc.size(), (int)_persistentCacheKeys.size());
+    _nameCacheDirty = false;
 }
 
 void AnnounceManager::loadNameCache() {
@@ -760,7 +832,11 @@ void AnnounceManager::loadNameCache() {
     JsonDocument doc;
     if (deserializeJson(doc, json)) return;
     for (JsonPair kv : doc.as<JsonObject>()) {
-        _nameCache[kv.key().c_str()] = kv.value().as<std::string>();
+        std::string hexHash = kv.key().c_str();
+        _nameCache[hexHash] = kv.value().as<std::string>();
+        // Mark as persistent: these names were saved from a prior session and
+        // must not be evicted when a TCP hub floods the cache with new peers.
+        _persistentCacheKeys.insert(hexHash);
     }
     Serial.printf("[ANNOUNCE] Name cache loaded (%d entries)\n", (int)_nameCache.size());
 }

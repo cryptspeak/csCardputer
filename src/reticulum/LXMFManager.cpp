@@ -162,6 +162,10 @@ void LXMFManager::loop() {
         std::string peerHex = msg.sourceHash.toHex();
         _unread[peerHex]++;
 
+        // Mark the sender's name as persistent so it survives a TCP hub flood
+        // overflowing the name cache before the next save.
+        if (_announceManager) _announceManager->markNamePersistent(peerHex);
+
         // Notify UI
         if (_onMessage) {
             _onMessage(msg);
@@ -234,6 +238,10 @@ bool LXMFManager::sendMessage(const RNS::Bytes& destHash, const std::string& con
     }
 
     _outQueue.push_back(msg);
+
+    // Mark the peer's name as persistent — we're now in a conversation with them
+    // and their display name must survive a TCP hub flooding the name cache.
+    if (_announceManager) _announceManager->markNamePersistent(destHash.toHex());
 
     // Save outgoing message to disk immediately (creates conversation entry)
     if (_store) {
