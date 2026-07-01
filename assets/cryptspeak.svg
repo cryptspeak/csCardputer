@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="1847.6543"
+   height="375.3857"
+   viewBox="0 -15 488.85851 99.320979"
+   version="1.1"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><g
+     transform="matrix(3.5548743,0,0,3.5548743,-111.99547,-32.240729)"><text
+       style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-size:22.3603px;line-height:0px;font-family:'Space Grotesk';letter-spacing:-1.20013px;word-spacing:0px;writing-mode:lr-tb;direction:ltr;fill:#8c5cf1;fill-opacity:1;stroke-width:0.262034"
+       x="54.432297"
+       y="24.809835"
+       transform="scale(1.0097211,0.99037249)"><tspan
+         style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Space Grotesk';fill:#8c5cf1;fill-opacity:1;stroke-width:0.262034"
+         x="54.432297"
+         y="24.809835">crypt<tspan
+   style="fill:#ffffff">speak</tspan></tspan></text><g
+       style="display:inline;fill:none"
+       transform="matrix(0.30643578,0,0,0.31723109,26.984647,4.7938237)"><path
+         d="M 37,20 H 65 A 15,15 0 0 1 80,35 V 55 A 15,15 0 0 1 65,70 H 33 L 18,85 22,64 V 35 A 15,15 0 0 1 37,20 Z"
+         stroke="#8c5cf1"
+         stroke-width="6.5"
+         stroke-linejoin="round"
+         stroke-linecap="round" /><circle
+         cx="51"
+         cy="40"
+         r="8"
+         fill="#8c5cf1"
+         style="fill:#8c5cf1" /><path
+         d="M 47.6,45 44,58 H 58 L 54.4,45 Z"
+         fill="#8c5cf1"
+         style="fill:#8c5cf1" /></g></g></svg>
