@@ -82,10 +82,10 @@ WiFiInterface* wifiImpl = nullptr;
 RNS::Interface wifiIface({RNS::Type::NONE});
 std::vector<TCPClientInterface*> tcpClients;
 std::list<RNS::Interface> tcpIfaces;  // Must persist — Transport stores references (list: no realloc)
-std::list<TCPClientInterface*> retiredTcpClients;
 AutoInterfaceWrapper autoIface;
 bool autoIfaceDeferredStart = false;
 unsigned long autoIfaceDeferredAt = 0;
+unsigned long tcpReloadAnnounceAt = 0;  // deferred re-announce after TCP clients come up
 unsigned long lastAutoIfaceLinkCheck = 0;
 UserConfig userConfig;
 PowerManager power;
@@ -202,39 +202,18 @@ static const char* currentPosixTZ() {
 // TCP client management — stop old clients, create new from config
 // =============================================================================
 
-static void drainRetiredTCPClients() {
-    for (auto it = retiredTcpClients.begin(); it != retiredTcpClients.end(); ) {
-        TCPClientInterface* tcp = *it;
-        if (!tcp || tcp->canDestroy()) {
-            if (tcp) delete tcp;
-            it = retiredTcpClients.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-static void retireTCPClient(TCPClientInterface* tcp) {
-    if (!tcp) return;
-    tcp->stop();
-    if (tcp->canDestroy()) {
-        delete tcp;
-    } else {
-        retiredTcpClients.push_back(tcp);
-    }
-}
-
 static void reloadTCPClients() {
-    // Stop and deregister existing clients
+    // Stop all clients first (marks them offline, waits for any in-flight
+    // connect task to finish so the shared_ptr destructor below is safe)
+    for (auto* tcp : tcpClients) {
+        if (tcp) tcp->stop();
+    }
     for (auto& iface : tcpIfaces) {
         RNS::Transport::deregister_interface(iface);
     }
-    for (auto* tcp : tcpClients) {
-        retireTCPClient(tcp);
-    }
     tcpClients.clear();
+    // shared_ptr inside each RNS::Interface drops to 0 here → ~TCPClientInterface
     tcpIfaces.clear();
-    drainRetiredTCPClients();
 
     // Create new clients from current config
     if (WiFi.status() == WL_CONNECTED) {
@@ -257,6 +236,11 @@ static void reloadTCPClients() {
 
     if (tcpClients.empty()) {
         Serial.println("[TCP] No active TCP connections");
+    } else {
+        // Schedule a re-announce ~4 s from now so the hub learns our address
+        // on the freshly-established TCP connection.  4 s is enough time for
+        // the async connect task to complete before the announce goes out.
+        tcpReloadAnnounceAt = millis() + 4000;
     }
 }
 
@@ -1637,12 +1621,21 @@ void loop() {
     // 4. Auto-announce (2 minutes)
     if (bootComplete && now - lastAutoAnnounce >= ANNOUNCE_INTERVAL_MS) {
         lastAutoAnnounce = now;
+        tcpReloadAnnounceAt = 0;  // periodic announce subsumes any pending TCP reload announce
         if (rns.loraInterface() && rns.loraInterface()->airtimeUtilization() > LoRaInterface::AIRTIME_THROTTLE) {
             Serial.println("[AUTO] Skipping announce: LoRa airtime > 25%");
         } else {
             announceWithName(!power.isScreenOn());
             Serial.println("[AUTO] Periodic announce");
         }
+    }
+
+    // 4.1. Deferred re-announce after TCP clients reconnect (tells the hub
+    // our address on the new connection so inbound routing works again).
+    if (tcpReloadAnnounceAt > 0 && bootComplete && now >= tcpReloadAnnounceAt) {
+        tcpReloadAnnounceAt = 0;
+        announceWithName(true);  // silent — no UI indicator, just the network packet
+        Serial.println("[TCP] Post-reload announce sent");
     }
 
     // 5. WiFi STA non-blocking connection handler
@@ -1689,12 +1682,11 @@ void loop() {
             }
         } else if (!connected && wifiSTAConnected) {
             wifiSTAConnected = false;
-            // Stop and deregister TCP clients cleanly
+            for (auto* tcp : tcpClients) {
+                if (tcp) tcp->stop();
+            }
             for (auto& iface : tcpIfaces) {
                 RNS::Transport::deregister_interface(iface);
-            }
-            for (auto* tcp : tcpClients) {
-                retireTCPClient(tcp);
             }
             tcpClients.clear();
             tcpIfaces.clear();
@@ -1747,7 +1739,6 @@ void loop() {
 
     // 6. TCP transport (with global budget) — skip if RNS was overloaded
     {
-        drainRetiredTCPClients();
         bool skipTcp = (rnsDuration > 200);
         if (!skipTcp && wifiImpl) wifiImpl->loop();
         if (!skipTcp) {

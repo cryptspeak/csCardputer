@@ -21,11 +21,6 @@ TCPClientInterface::TCPClientInterface(const char* host, uint16_t port, const ch
 
 TCPClientInterface::~TCPClientInterface() {
     stop();
-    if (_connectState == CS_CONNECTING) {
-        Serial.printf("[TCP] Waiting for connect task before destroy: %s:%d\n",
-                      _host.c_str(), _port);
-        waitForConnectTask();
-    }
     if (_client.connected()) _client.stop();
     if (_rxBuffer) { free(_rxBuffer); _rxBuffer = nullptr; }
     if (_txBuffer) { free(_txBuffer); _txBuffer = nullptr; }
@@ -34,6 +29,16 @@ TCPClientInterface::~TCPClientInterface() {
 
 bool TCPClientInterface::start() {
     _online = true;
+    // Reset all per-connection state so a reloaded interface starts clean,
+    // not carrying stale HDLC frame or hub-transport-id from a previous run.
+    _inFrame = false;
+    _escaped = false;
+    _rxPos = 0;
+    _hubTransportIdKnown = false;
+    memset(_hubTransportId, 0, sizeof(_hubTransportId));
+    _lastRxTime = 0;
+    _reconnectBackoff = 1000;
+    _lastAttempt = 0;
     tryConnect();
     return true;
 }
@@ -41,11 +46,13 @@ bool TCPClientInterface::start() {
 void TCPClientInterface::stop() {
     _online = false;
     if (_connectState == CS_CONNECTING) {
-        if (WiFi.status() != WL_CONNECTED) {
-            Serial.printf("[TCP] Stop deferred while connect task exits for %s:%d\n",
-                          _host.c_str(), _port);
-            return;
-        }
+        // Always wait for the connect task to finish before returning. When
+        // WiFi is down, the underlying _client.connect() fails within
+        // milliseconds (ESP32 lwIP aborts pending sockets on network loss),
+        // so this does not meaningfully delay the caller. Returning early
+        // while the task is still in flight is unsafe: the task holds a `self`
+        // pointer and writes _connectState at the end; if we return and the
+        // destructor runs first, that write hits freed memory.
         waitForConnectTask();
     } else {
         _connectTask = nullptr;

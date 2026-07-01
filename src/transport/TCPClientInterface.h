@@ -23,7 +23,6 @@ public:
         if (_connectState == CS_CONNECTING) return false;
         return _client.connected();
     }
-    bool canDestroy() const { return _connectState != CS_CONNECTING; }
     const String& host() const { return _host; }
     uint16_t port() const { return _port; }
 
