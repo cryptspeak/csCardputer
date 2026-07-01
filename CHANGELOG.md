@@ -5,6 +5,64 @@ Versioning is independent of upstream
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) — see
 `docs/firmware-architecture.md`.
 
+## v0.1.2 — TCP Stability, Name Persistence & Identity Verification
+
+### Fixed
+
+- **TCP:** toggling TCP connections in Settings crashed the device with a
+  double-free/use-after-free. `retireTCPClient()` called `delete` on a raw
+  pointer already owned by `RNS::Interface`'s shared_ptr; teardown then freed
+  it a second time. Fixed by letting `tcpIfaces.clear()` be the sole
+  destructor and calling `tcp->stop()` directly before clearing both
+  containers.
+- **TCP:** `TCPClientInterface::stop()` returned early when WiFi dropped
+  while a connect task was still in flight, leaving the task alive with a
+  dangling `self` pointer. If the destructor ran first, the task's subsequent
+  `_connectState` write hit freed memory. Fixed by always waiting for the
+  connect task; ESP32 lwIP aborts pending sockets within milliseconds of
+  network loss, so the wait is fast.
+- **TCP:** a reloaded `TCPClientInterface` inherited stale HDLC frame state,
+  hub transport ID, and reconnect backoff from its previous run. `start()` now
+  resets all per-connection state. A re-announce fires 4 s after new clients
+  are created so the hub learns our address on the fresh connection.
+- **Names:** non-contact peer names disappeared after every reboot. Three
+  interlocking bugs: (1) no priority tracking — TCP hub announces could fill
+  the 60-entry on-disk cap, displacing peers we'd actually messaged; (2)
+  eviction race — the RAM guard could evict a name before the first message
+  exchange marked it persistent, with no recovery path; (3) missing dirty flag
+  — if the 5 s save timer fired before a message exchange, `markNamePersistent`
+  returned early without scheduling a re-save, so the entry was never promoted
+  to a guaranteed slot. All three fixed; names of messaged peers now survive
+  reboots reliably regardless of TCP hub activity or session length.
+- **Names:** `lookupName()` short-circuited on the 12-char truncated-hash
+  placeholder assigned by `notePeerInterface()` when a peer messages us before
+  ever announcing, blocking `recall_app_data()` from returning their real
+  display name from the RNS identity cache.
+- **Stamps:** stamp computation could grind forever or crash when a peer
+  required a high proof-of-work cost. Added `STAMP_HARD_MAX=16` (hard reject
+  above the ESP32-S3 feasibility ceiling), a 30 s abort timeout, and
+  `try/catch` OOM protection in the stamp task. Task stack doubled to 8 KB.
+  UserConfig ceiling clamped to 1–16 to match.
+
+### Added
+
+- **UI:** "Show Address" option in both the Peers tab action menu and the
+  Messages tab context menu. Displays the peer's full 32-char LXMF destination
+  hash as two formatted lines (`abcd ef01 2345 6789` / `89ab cdef 0123 4567`),
+  making it straightforward to compare against a known-good hash and detect
+  identity spoofing.
+
+### Changed
+
+- **Settings:** WiFi mode and Auto-discover LAN changes now chain a
+  "Reboot now / Later" popup immediately after saving, replacing an
+  easily-missed toast. Both settings require a reboot to take effect.
+- **Peers:** non-contact peers are now sorted by most-recently-heard time
+  (most recent first) instead of alphabetically, so active nodes float to
+  the top of the list. Saved contacts keep alphabetical order.
+
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.1.1...v0.1.2
+
 ## v0.1.1 — Repo Move
 
 Repo transferred from the original maintainer's account to the
