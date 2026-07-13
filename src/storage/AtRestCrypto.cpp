@@ -6,6 +6,7 @@
 #include <Cryptography/HMAC.h>
 #include <Cryptography/Random.h>
 #include <string.h>
+#include <algorithm>
 
 namespace AtRestCrypto {
 
@@ -178,6 +179,36 @@ bool decryptOrPassthrough(const Domain& domain, const RNS::Identity& identity,
     out.reserve(plaintext.size());
     for (size_t i = 0; i < plaintext.size(); i++) {
         out.concat((char)plaintext.data()[i]);
+    }
+    return true;
+}
+
+bool blindIndexHex(const RNS::Identity& identity, const char* hkdfInfo,
+                    const uint8_t* input, size_t input_len,
+                    std::string& out_hex, size_t hexChars) {
+    if (!identity) return false;
+    const RNS::Bytes& priv = identity.encryptionPrivateKey();
+    if (priv.size() == 0) return false;
+
+    RNS::Bytes salt = identity.hash();
+    RNS::Bytes info((const uint8_t*)hkdfInfo, strlen(hkdfInfo));
+    RNS::Bytes key = RNS::Cryptography::hkdf(32, priv, salt, info);
+    if (key.size() != 32) return false;
+
+    RNS::Cryptography::HMAC hmac(key);
+    hmac.update(RNS::Bytes(input, input_len));
+    RNS::Bytes mac = hmac.digest();
+    secureZero((void*)key.data(), key.size());
+    if (mac.size() == 0) return false;
+
+    static const char* hexDigits = "0123456789abcdef";
+    hexChars = std::min(hexChars, mac.size() * 2);
+    out_hex.clear();
+    out_hex.reserve(hexChars);
+    for (size_t i = 0; i < hexChars; i++) {
+        uint8_t byte = mac.data()[i / 2];
+        uint8_t nibble = (i % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
+        out_hex.push_back(hexDigits[nibble]);
     }
     return true;
 }

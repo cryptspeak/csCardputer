@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string>
 #include <Bytes.h>
 #include <Identity.h>
 
@@ -96,5 +97,23 @@ bool decryptOrPassthrough(const Domain& domain, const RNS::Identity& identity,
 
 // Securely overwrite a buffer (defeats compiler dead-store elimination).
 void secureZero(void* p, size_t n);
+
+// Deterministic, identity-keyed "blind index": HMAC-SHA256(key, input),
+// hex-encoded and truncated to `hexChars` characters. `key` is derived the
+// same way as encrypt()/decrypt() (HKDF over the identity's private key,
+// salted with its hash) but namespaced by its own `hkdfInfo` string, so an
+// index token can't be correlated with, or used to derive, any domain's
+// encryption key.
+//
+// Used where a value must stay addressable as a filename/directory name
+// (so it can be looked up without decrypting everything first) without
+// that name itself revealing the plaintext it stands for — e.g. a peer's
+// destination hash used as a conversation directory name. Same identity
+// always produces the same token for the same input (so existing files
+// stay reachable across reboots), but a different identity — or no
+// identity at all — cannot reproduce or invert it.
+bool blindIndexHex(const RNS::Identity& identity, const char* hkdfInfo,
+                    const uint8_t* input, size_t input_len,
+                    std::string& out_hex, size_t hexChars = 16);
 
 }  // namespace AtRestCrypto

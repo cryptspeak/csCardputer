@@ -17,6 +17,13 @@ public:
     bool writeDirect(const char* path, const uint8_t* data, size_t len);
     bool readFile(const char* path, uint8_t* buffer, size_t maxLen, size_t& bytesRead);
 
+    // Resets a file's on-disk mtime/atime to a fixed, non-informative value
+    // (unix epoch) — LittleFS timestamps a file with real wall-clock time at
+    // write, which for per-message files means "when this message arrived"
+    // is readable straight off the filesystem, no decryption required. See
+    // WriteQueue::processJob(), the only caller.
+    bool scrubTimestamp(const char* path);
+
     // String convenience wrappers
     bool writeString(const char* path, const String& data);
     String readString(const char* path);

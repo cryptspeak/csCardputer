@@ -3,9 +3,12 @@
 #include "storage/SDStore.h"
 #include "storage/FlashStore.h"
 #include "storage/ContactsEncryption.h"
+#include "storage/AtRestCrypto.h"
 #include "hal/SharedSPIBus.h"
 #include "transport/LoRaInterface.h"
 #include <ArduinoJson.h>
+#include <Preferences.h>
+#include <unordered_set>
 // LittleFS access through FlashStore (mutex-protected)
 
 namespace {
@@ -30,6 +33,25 @@ bool maybeDecryptContact(const RNS::Identity* identity, const String& raw, Strin
     if (!ContactsEncryption::isEncrypted(raw)) { out = raw; return true; }  // legacy
     if (!identity || !*identity) return false;
     return ContactsEncryption::decryptOrPassthrough(*identity, raw, out);
+}
+
+// The filename a contact is stored under. This must NOT be (a prefix of)
+// the peer's own destination hash -- a directory listing of /contacts is
+// readable without decrypting anything, so a hash-derived filename would
+// hand an attacker the exact "who you've saved as a contact" list that
+// ContactsEncryption's content encryption is supposed to protect. Same
+// identity-keyed blind index used for conversation directories (see
+// MessageStore::dirTokenForPeer()): deterministic for this device's
+// identity, unrecoverable without it.
+String contactFileToken(const RNS::Identity* identity, const std::string& hexHash) {
+    std::string token;
+    if (identity && *identity &&
+        AtRestCrypto::blindIndexHex(*identity, "rscardputer.contactfile.v1",
+                                     (const uint8_t*)hexHash.data(), hexHash.size(),
+                                     token)) {
+        return String(token.c_str());
+    }
+    return String(hexHash.substr(0, 16).c_str());
 }
 }  // namespace
 
@@ -527,7 +549,7 @@ void AnnounceManager::rebuildIndex() {
     }
 }
 
-void AnnounceManager::saveContact(const DiscoveredNode& node) {
+bool AnnounceManager::saveContact(const DiscoveredNode& node) {
     std::string hexHash = node.hash.toHex();
 
     JsonDocument doc;
@@ -539,13 +561,15 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
     serializeJson(doc, json);
     json = maybeEncryptContact(_identity, json);
 
-    String filename = hexHash.substr(0, 16).c_str();
+    String filename = contactFileToken(_identity, hexHash);
     filename += ".json";
 
+    bool sdReady = _sd && _sd->isReady();
+    bool flashReady = _flash && _flash->isReady();
     bool sdOk = false, flashOk = false;
 
     // Write to SD (primary)
-    if (_sd && _sd->isReady()) {
+    if (sdReady) {
         _sd->ensureDir(SD_PATH_CONTACTS);
         String sdPath = String(SD_PATH_CONTACTS) + "/" + filename;
         sdOk = _sd->writeString(sdPath.c_str(), json);
@@ -561,7 +585,7 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
     }
 
     // Write to flash (fallback)
-    if (_flash && _flash->isReady()) {
+    if (flashReady) {
         _flash->ensureDir(PATH_CONTACTS);
         String flashPath = String(PATH_CONTACTS) + "/" + filename;
         flashOk = _flash->writeString(flashPath.c_str(), json);
@@ -577,10 +601,16 @@ void AnnounceManager::saveContact(const DiscoveredNode& node) {
         Serial.printf("[CONTACT] WARNING: Failed to persist contact %s!\n",
                       hexHash.substr(0, 8).c_str());
     }
+
+    // Success requires every backend that was actually ready to have
+    // accepted the write, and at least one backend to have been ready at
+    // all -- saveContacts() uses this to decide whether it's safe to
+    // remove this contact's old legacy-named file (see there).
+    return (sdReady || flashReady) && (!sdReady || sdOk) && (!flashReady || flashOk);
 }
 
 void AnnounceManager::removeContact(const std::string& hexHash) {
-    String filename = hexHash.substr(0, 16).c_str();
+    String filename = contactFileToken(_identity, hexHash);
     filename += ".json";
 
     if (_sd && _sd->isReady()) {
@@ -601,8 +631,22 @@ void AnnounceManager::removeContact(const std::string& hexHash) {
 
 void AnnounceManager::loadContacts() {
     int loaded = 0;
+    _staleContactFiles.clear();
 
-    auto loadFromDir = [&](File& dir, const char* source) {
+    // contactFileToken() migration is one-time: computing a blind index
+    // per contact file just to confirm "yes, already correctly named" is
+    // wasted HKDF+HMAC work on every single boot forever once there's
+    // nothing left to migrate. Check the flag once here rather than
+    // re-deriving a token per file on every boot -- see saveContacts()
+    // for where the flag gets set after a successful migration pass.
+    Preferences tprefs;
+    tprefs.begin("ratcom", true);
+    bool tokenized = tprefs.getBool("contacts_tok", false);
+    tprefs.end();
+    _contactsTokenizePending = !tokenized;
+
+    auto loadFromDir = [&](File& dir, const char* source, bool useSD) {
+        const char* baseDir = useSD ? SD_PATH_CONTACTS : PATH_CONTACTS;
         int filesFound = 0;
         File entry = dir.openNextFile();
         while (entry) {
@@ -623,6 +667,22 @@ void AnnounceManager::loadContacts() {
                     if (!deserializeJson(doc, json)) {
                         std::string hexHash = doc["hash"] | "";
                         if (!hexHash.empty()) {
+                            // Filename predates contactFileToken() (or was
+                            // written by an older build that used the
+                            // truncated hash directly) -- queue it for
+                            // removal once saveContacts() has written the
+                            // correctly-named copy. See contactFileToken().
+                            // Skipped once contacts_tok is set (see
+                            // above) -- nothing left to catch after the
+                            // first migration pass.
+                            if (_contactsTokenizePending) {
+                                String expectedName = contactFileToken(_identity, hexHash) + ".json";
+                                if (entryName != expectedName) {
+                                    _staleContactFiles.push_back(
+                                        {useSD, String(baseDir) + "/" + entryName, hexHash});
+                                }
+                            }
+
                             // Check if already loaded (avoid duplicates)
                             RNS::Bytes hash;
                             hash.assignHex(hexHash.c_str());
@@ -662,7 +722,7 @@ void AnnounceManager::loadContacts() {
         if (lock.locked()) {
             File dir = _sd->openDir(SD_PATH_CONTACTS);
             if (dir && dir.isDirectory()) {
-                loadFromDir(dir, "SD");
+                loadFromDir(dir, "SD", true);
             } else {
                 Serial.println("[CONTACT] SD contacts dir not found");
             }
@@ -676,7 +736,7 @@ void AnnounceManager::loadContacts() {
     if (_flash && _flash->isReady()) {
         File dir = _flash->openDir(PATH_CONTACTS);
         if (dir && dir.isDirectory()) {
-            loadFromDir(dir, "Flash");
+            loadFromDir(dir, "Flash", false);
         } else {
             Serial.println("[CONTACT] Flash contacts dir not found");
         }
@@ -691,13 +751,69 @@ void AnnounceManager::saveContacts() {
         _contactsDirty = true;
         return;
     }
+
+    // Track which contacts failed to persist under their current
+    // (blind-indexed) filename -- their old legacy-named file must not be
+    // removed below, since it would be the only remaining copy of that
+    // contact's data.
+    std::unordered_set<std::string> failedHashes;
     for (const auto& node : _nodes) {
         if (node.saved) {
-            saveContact(node);
+            if (!saveContact(node)) {
+                failedHashes.insert(node.hash.toHex());
+            }
             yield();
         }
     }
-    _contactsDirty = false;
+    _contactsDirty = !failedHashes.empty();
+
+    // Remove legacy hash-named files loadContacts() found, now that the
+    // corresponding new-named file is confirmed written. Anything skipped
+    // (that peer's save failed above) or that fails to actually disappear
+    // (remove() error) stays queued for the next saveContacts() pass
+    // instead of being silently dropped.
+    std::vector<StaleContactFile> stillPending;
+    for (auto& stale : _staleContactFiles) {
+        if (failedHashes.count(stale.hexHash)) {
+            stillPending.push_back(stale);
+            continue;
+        }
+        bool removed = false;
+        if (stale.useSD && _sd && _sd->isReady()) {
+            _sd->remove(stale.path.c_str());
+            _sd->remove((stale.path + ".tmp").c_str());
+            _sd->remove((stale.path + ".bak").c_str());
+            removed = !_sd->exists(stale.path.c_str());
+        } else if (!stale.useSD && _flash && _flash->isReady()) {
+            _flash->remove(stale.path.c_str());
+            _flash->remove((stale.path + ".tmp").c_str());
+            _flash->remove((stale.path + ".bak").c_str());
+            removed = !_flash->exists(stale.path.c_str());
+        }
+        if (!removed) {
+            stillPending.push_back(stale);
+        }
+    }
+    int removedCount = (int)_staleContactFiles.size() - (int)stillPending.size();
+    if (removedCount > 0) {
+        Serial.printf("[CONTACT] Removed %d legacy-named contact file(s)\n", removedCount);
+    }
+    _staleContactFiles = std::move(stillPending);
+
+    // Only mark the one-time filename migration complete once every saved
+    // contact persisted successfully under its new name AND every legacy
+    // -named file was actually removed. A partial failure (SD pulled
+    // mid-boot, an I/O error) leaves this flag unset, so loadContacts()
+    // re-derives _staleContactFiles and this function retries on a later
+    // pass instead of silently leaving a plaintext-hash-named contact
+    // file on disk forever -- see docs/encryption-contacts-settings.md.
+    if (_contactsTokenizePending && failedHashes.empty() && _staleContactFiles.empty()) {
+        Preferences tprefs;
+        tprefs.begin("ratcom", false);
+        tprefs.putBool("contacts_tok", true);
+        tprefs.end();
+        _contactsTokenizePending = false;
+    }
 }
 
 void AnnounceManager::loop() {

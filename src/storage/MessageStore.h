@@ -77,16 +77,35 @@ public:
     int remainingCapacity() const { return std::max(0, messageLimit() - _totalMessageCount); }
 
 private:
+    // Directory token for a conversation: an identity-keyed blind index of
+    // peerHex, NOT the hash (or a truncation of it) itself -- see
+    // dirTokenForPeer()'s definition for why.
+    std::string dirTokenForPeer(const std::string& peerHex) const;
     String conversationDir(const std::string& peerHex) const;
     String sdConversationDir(const std::string& peerHex) const;
 
     void enforceFlashCache(const std::string& peerHex);
+    void enforceFlashCacheDir(const String& dir, const std::string& logLabel);
     void migrateFlashToSD();
     void migrateOldFilenames();
-    // The directory itself is named with peerHex truncated to 16 hex chars
-    // (see conversationDir()) -- not enough bytes to address a packet to.
+    // One-time (NVS-flagged) rename of every existing conversation
+    // directory from its old peerHex-derived name to dirTokenForPeer()'s
+    // blind index, for installs that had conversations on disk before that
+    // scheme existed. See docs/encryption-known-destinations.md's sibling
+    // note in threat-model.md for why the old naming leaked.
+    void migrateConversationDirTokens();
+    // One-time (NVS-flagged) pass over every existing message file, on both
+    // backends, resetting its filesystem mtime/atime to a fixed sentinel —
+    // see FlashStore::scrubTimestamp()/SDStore::scrubTimestamp(). Needed
+    // because files written before this fix existed already carry a real
+    // wall-clock write time from LittleFS/FAT; new writes are scrubbed as
+    // they happen (see WriteQueue::processJob()), but that doesn't reach
+    // files already on disk.
+    void scrubExistingMessageTimestamps();
+    // The directory itself is named with an opaque per-peer token (see
+    // conversationDir()) -- not derivable back into a destination hash.
     // Every message file inside still carries the full src/dst hex, so peek
-    // at one to recover it instead of handing the lossy directory name out
+    // at one to recover it instead of handing the opaque directory name out
     // to callers that need a real destination hash (e.g. to send a reply).
     std::string resolveConversationPeerHex(const String& dirPath, bool useSD) const;
     void initReceiveCounter();

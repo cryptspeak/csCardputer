@@ -151,6 +151,14 @@ got the encrypted blob written, plugging the SD card back in causes the
 next boot to backfill it automatically, with no explicit migration step
 required.
 
+Right after `loadOrCreateIdentity()` returns, `begin()` wires
+`RNS::Identity::known_destinations_crypto()` and only then calls
+`RNS::Identity::load_known_destinations()` — decrypting the table
+requires the identity's private key, so the load has to happen after the
+identity is available. See
+[encryption-known-destinations.md](encryption-known-destinations.md) for
+what that table is and why it's encrypted.
+
 ## Identity hash display formatting
 
 `identityHash()` and `destinationHashStr()` both produce

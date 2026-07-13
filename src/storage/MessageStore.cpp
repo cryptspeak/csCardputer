@@ -3,6 +3,7 @@
 #include "hal/SharedSPIBus.h"
 // All LittleFS access goes through FlashStore (mutex-protected)
 #include "storage/MessageEncryption.h"
+#include "storage/AtRestCrypto.h"
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <algorithm>
@@ -68,6 +69,44 @@ bool MessageStore::begin(FlashStore* flash, SDStore* sd) {
         mp.putBool("fs_migrated", true);
         mp.end();
         Serial.println("[MSGSTORE] Migration complete, flag set");
+    }
+
+    // One-time migration: rename conversation directories off their old
+    // peerHex-derived names onto dirTokenForPeer()'s blind index. Gated by
+    // its own flag, separate from fs_migrated above -- every device that
+    // shipped before this existed already has fs_migrated=true, so reusing
+    // that flag would mean this migration silently never runs on any
+    // existing install.
+    {
+        Preferences cp;
+        cp.begin("ratcom", true);
+        bool dirsMigrated = cp.getBool("convdirs_tok", false);
+        cp.end();
+        if (!dirsMigrated) {
+            migrateConversationDirTokens();
+            Preferences cp2;
+            cp2.begin("ratcom", false);
+            cp2.putBool("convdirs_tok", true);
+            cp2.end();
+        }
+    }
+
+    // One-time migration: scrub real wall-clock filesystem timestamps off
+    // every existing message file. Gated by its own flag -- unrelated to
+    // fs_migrated/convdirs_tok above, since neither of those installs
+    // had this scrub applied either.
+    {
+        Preferences tp;
+        tp.begin("ratcom", true);
+        bool tsScrubbed = tp.getBool("msg_ts_scrubbed", false);
+        tp.end();
+        if (!tsScrubbed) {
+            scrubExistingMessageTimestamps();
+            Preferences tp2;
+            tp2.begin("ratcom", false);
+            tp2.putBool("msg_ts_scrubbed", true);
+            tp2.end();
+        }
     }
 
     // Start async write queue
@@ -189,8 +228,14 @@ void MessageStore::migrateFlashToSD() {
     File peerDir = dir.openNextFile();
     while (peerDir) {
         if (peerDir.isDirectory()) {
-            std::string peerHex = peerDir.name();
-            String sdDir = sdConversationDir(peerHex);
+            // Mirror the flash directory's name onto SD verbatim -- it's
+            // already an opaque token (or, pre-migration, a truncated
+            // hash), not something to re-derive via conversationDir(). The
+            // two backends must agree on the token for a given peer, and
+            // this dir already picked one.
+            String dirName = peerDir.name();
+            String flashDir = String(PATH_MESSAGES) + "/" + dirName;
+            String sdDir = String(SD_PATH_MESSAGES) + "/" + dirName;
             _sd->ensureDir(sdDir.c_str());
 
             File entry = peerDir.openNextFile();
@@ -211,7 +256,7 @@ void MessageStore::migrateFlashToSD() {
                 entry = peerDir.openNextFile();
             }
 
-            enforceFlashCache(peerHex);
+            enforceFlashCacheDir(flashDir, dirName.c_str());
         }
         peerDir.close();
         peerDir = dir.openNextFile();
@@ -371,6 +416,114 @@ void MessageStore::migrateOldFilenames() {
     if (totalMigrated > 0) {
         Serial.printf("[MSGSTORE] Migrated %d old filenames to new format\n", totalMigrated);
     }
+}
+
+void MessageStore::migrateConversationDirTokens() {
+    if (!encryptionEnabled()) return;  // no identity yet -- can't compute tokens
+
+    auto migrateBackend = [&](bool useSD) {
+        const char* base = useSD ? SD_PATH_MESSAGES : PATH_MESSAGES;
+        if (useSD && (!_sd || !_sd->isReady())) return;
+        if (!useSD && !_flash) return;
+
+        // List first, act after closing the outer directory handle -- same
+        // two-pass shape as migrateOldFilenames(), which avoids iterating a
+        // directory while renaming/removing entries out from under it.
+        std::vector<String> dirNames;
+        {
+            File dir = useSD ? _sd->openDir(base) : _flash->openDir(base);
+            if (!dir || !dir.isDirectory()) { if (dir) dir.close(); return; }
+            File entry = dir.openNextFile();
+            while (entry) {
+                if (entry.isDirectory()) dirNames.push_back(String(entry.name()));
+                entry.close();
+                entry = dir.openNextFile();
+            }
+            dir.close();
+        }
+
+        int migratedDirs = 0;
+        for (auto& dirName : dirNames) {
+            String oldPath = String(base) + "/" + dirName;
+            std::string fullHex = resolveConversationPeerHex(oldPath, useSD);
+            if (fullHex.empty()) continue;  // nothing to peek at -- leave for a later boot
+
+            std::string newToken = dirTokenForPeer(fullHex);
+            if (dirName == newToken.c_str()) continue;  // already token-named
+
+            String newPath = String(base) + "/" + newToken.c_str();
+            // A directory rename is a single directory-entry update on both
+            // LittleFS and FAT (same parent, no data movement) -- cheap and
+            // effectively atomic, unlike moving every message file
+            // individually. Bounded by conversation count, not message
+            // count, so this doesn't need the message-migration screen's
+            // progress bar the way re-encrypting message bodies did.
+            bool ok = useSD ? _sd->rename(oldPath, newPath) : _flash->rename(oldPath, newPath);
+            if (!ok) {
+                Serial.printf("[MSGSTORE] Conversation dir rename failed (%s): %s\n",
+                              useSD ? "SD" : "flash", oldPath.c_str());
+                continue;
+            }
+            migratedDirs++;
+            yield();
+        }
+
+        if (migratedDirs > 0) {
+            Serial.printf("[MSGSTORE] Migrated %d conversation dir name(s) on %s to blind-indexed tokens\n",
+                          migratedDirs, useSD ? "SD" : "flash");
+        }
+    };
+
+    migrateBackend(true);
+    migrateBackend(false);
+}
+
+void MessageStore::scrubExistingMessageTimestamps() {
+    auto scrubBackend = [&](bool useSD) {
+        const char* base = useSD ? SD_PATH_MESSAGES : PATH_MESSAGES;
+        if (useSD && (!_sd || !_sd->isReady())) return;
+        if (!useSD && !_flash) return;
+
+        File dir = useSD ? _sd->openDir(base) : _flash->openDir(base);
+        if (!dir || !dir.isDirectory()) { if (dir) dir.close(); return; }
+
+        int scrubbed = 0;
+        File convEntry = dir.openNextFile();
+        while (convEntry) {
+            if (convEntry.isDirectory()) {
+                String convPath = String(base) + "/" + convEntry.name();
+                File convDir = useSD ? _sd->openDir(convPath.c_str()) : _flash->openDir(convPath.c_str());
+                if (convDir) {
+                    File msgEntry = convDir.openNextFile();
+                    while (msgEntry) {
+                        if (!msgEntry.isDirectory()) {
+                            String msgPath = convPath + "/" + msgEntry.name();
+                            msgEntry.close();
+                            bool ok = useSD ? _sd->scrubTimestamp(msgPath.c_str())
+                                            : _flash->scrubTimestamp(msgPath.c_str());
+                            if (ok) scrubbed++;
+                        } else {
+                            msgEntry.close();
+                        }
+                        msgEntry = convDir.openNextFile();
+                    }
+                    convDir.close();
+                }
+            }
+            convEntry.close();
+            convEntry = dir.openNextFile();
+            yield();
+        }
+        dir.close();
+
+        if (scrubbed > 0) {
+            Serial.printf("[MSGSTORE] Scrubbed real-time filesystem timestamps off %d existing message file(s) on %s\n",
+                          scrubbed, useSD ? "SD" : "flash");
+        }
+    };
+
+    scrubBackend(true);
+    scrubBackend(false);
 }
 
 std::string MessageStore::resolveConversationPeerHex(const String& dirPath, bool useSD) const {
@@ -870,12 +1023,22 @@ bool MessageStore::updateMessageStatusByCounter(const std::string& peerHex, uint
         return writeFn(path.c_str(), payload);
     };
 
+    // A status update rewrites the whole file (writeString(), not
+    // WriteQueue), which would otherwise leave a fresh real-time mtime
+    // behind — scrub it the same way WriteQueue::processJob() does for the
+    // original write, so a later delivery/read receipt can't extend the
+    // forensic timeline past the message's original (already-scrubbed) file
+    // time.
     bool updated = false;
     if (_sd && _sd->isReady()) {
         String sdDir = sdConversationDir(peerHex);
         updated = readModifyWrite(
             [this](const char* p) { return _sd->readString(p); },
-            [this](const char* p, const String& d) { return _sd->writeString(p, d); },
+            [this](const char* p, const String& d) {
+                bool ok = _sd->writeString(p, d);
+                if (ok) _sd->scrubTimestamp(p);
+                return ok;
+            },
             sdDir);
     }
 
@@ -883,7 +1046,11 @@ bool MessageStore::updateMessageStatusByCounter(const std::string& peerHex, uint
         String dir = conversationDir(peerHex);
         bool flashUpdated = readModifyWrite(
             [this](const char* p) { return _flash->readString(p); },
-            [this](const char* p, const String& d) { return _flash->writeString(p, d); },
+            [this](const char* p, const String& d) {
+                bool ok = _flash->writeString(p, d);
+                if (ok) _flash->scrubTimestamp(p);
+                return ok;
+            },
             dir);
         updated = updated || flashUpdated;
     }
@@ -1025,12 +1192,34 @@ int MessageStore::unreadCountForPeer(const std::string& peerHex) const {
     return count;
 }
 
+std::string MessageStore::dirTokenForPeer(const std::string& peerHex) const {
+    // The token addressing a conversation on disk must not be the peer's
+    // destination hash itself -- that hash is exactly "who this device has
+    // talked to", so a raw or truncated copy of it sitting in a directory
+    // listing defeats message-content encryption for the one piece of
+    // information (the correspondent list) it can't otherwise protect.
+    // blindIndexHex() derives a deterministic-but-unrecoverable token from
+    // it instead: same peer always maps to the same directory (so it stays
+    // reachable across reboots), but only this device's identity can
+    // reproduce that mapping.
+    std::string token;
+    if (_identity && *_identity &&
+        AtRestCrypto::blindIndexHex(*_identity, "rscardputer.msgdir.v1",
+                                     (const uint8_t*)peerHex.data(), peerHex.size(),
+                                     token)) {
+        return token;
+    }
+    // No identity yet (shouldn't happen in normal boot order -- see
+    // setIdentity() callers -- but fall back rather than refuse I/O).
+    return peerHex.substr(0, 16);
+}
+
 String MessageStore::conversationDir(const std::string& peerHex) const {
-    return String(PATH_MESSAGES) + "/" + peerHex.substr(0, 16).c_str();
+    return String(PATH_MESSAGES) + "/" + dirTokenForPeer(peerHex).c_str();
 }
 
 String MessageStore::sdConversationDir(const std::string& peerHex) const {
-    return String(SD_PATH_MESSAGES) + "/" + peerHex.substr(0, 16).c_str();
+    return String(SD_PATH_MESSAGES) + "/" + dirTokenForPeer(peerHex).c_str();
 }
 
 int MessageStore::migratePlaintextMessages(MigrationProgressCallback cb) {
@@ -1118,7 +1307,13 @@ int MessageStore::migratePlaintextMessages(MigrationProgressCallback cb) {
 
 // Trim flash to cache size when SD is the primary store
 void MessageStore::enforceFlashCache(const std::string& peerHex) {
-    String dir = conversationDir(peerHex);
+    enforceFlashCacheDir(conversationDir(peerHex), peerHex.substr(0, 8));
+}
+
+// Path-based so migrateFlashToSD() -- which only has the already-resolved
+// on-disk directory name, not a real peerHex, to work with -- doesn't have
+// to round-trip it through conversationDir()'s blind index a second time.
+void MessageStore::enforceFlashCacheDir(const String& dir, const std::string& logLabel) {
     std::vector<String> files;
 
     File d = _flash->openDir(dir);
@@ -1146,5 +1341,5 @@ void MessageStore::enforceFlashCache(const std::string& peerHex) {
         _flash->remove(files[i]);
     }
     Serial.printf("[MSGSTORE] Flash cache trimmed %d for %s\n",
-                  excess, peerHex.substr(0, 8).c_str());
+                  excess, logLabel.c_str());
 }

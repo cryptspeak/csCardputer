@@ -88,8 +88,9 @@ primary color at all).
 
 For the exact compiled-in default palette, derivation is bypassed and the
 original hand-tuned constants are used verbatim — picking the "Default"
-preset (or never touching Theme settings at all) is guaranteed pixel-stable
-across this change.
+preset (or never touching Theme settings at all) always renders the same
+pixel-exact palette, regardless of preset/version churn elsewhere in the
+theme system.
 
 ## Presets
 
@@ -229,3 +230,32 @@ encrypted data, executing code, or affecting any other subsystem.
 Neither call touches `rns`, `identity`, or any encryption state — see
 [boot-sequence.md](boot-sequence.md) for why that ordering matters for
 *other* domains and why it deliberately does not apply here.
+
+### Backfilling flash from an SD-only theme
+
+If a saved theme exists only on SD — e.g. it was set on a build that
+predates flash always getting a copy on save — step 1's flash-only load
+finds nothing on every boot, and the boot screen renders the compiled-in
+default palette for the time it takes to get through the boot
+animation and radio init before SD mounts and step 2 corrects it. This
+is visible as a brief "wrong theme, then right theme" flash at boot.
+
+`Theme::load()` closes this by comparing flash's current copy against
+whatever it just loaded from SD, and rewriting flash's copy if they
+differ:
+
+```cpp
+if (fromSD && flash) {
+    String flashRaw = flash->readString(PATH_THEME_CONFIG);
+    if (flashRaw != raw) {
+        flash->writeString(PATH_THEME_CONFIG, raw);
+    }
+}
+```
+
+This is a no-op on every normal boot once the two tiers agree, and
+mirrors the same migrate-on-load pattern used for contacts and settings
+(see [encryption-contacts-settings.md](encryption-contacts-settings.md)).
+It resolves after one more boot: the boot after a mismatch is caught,
+flash has a copy, and step 1's flash-only load finds it immediately —
+no more default-theme flash on any boot after that.

@@ -1,6 +1,7 @@
 #include "ReticulumManager.h"
 #include "config/Config.h"
 #include "storage/FlashStore.h"
+#include "storage/KnownDestEncryption.h"
 #include "reticulum/IdentityCrypto.h"
 #include <Log.h>
 #include <LittleFS.h>
@@ -297,14 +298,52 @@ bool ReticulumManager::begin(SX1262* radio, FlashStore* flash) {
         return true;
     });
 
-    // Load persisted known destinations so Identity::recall() works
-    // immediately after reboot for previously-seen nodes.
-    RNS::Identity::load_known_destinations();
-
     // Load or create identity
     if (!loadOrCreateIdentity()) {
         Serial.println("[RNS] ERROR: Identity creation failed!");
         return false;
+    }
+
+    // Wire at-rest encryption for RNS::Identity's own known_destinations
+    // file before loading it. Each entry carries the last-heard announce
+    // app_data for a destination -- for an LXMF peer, that's their
+    // announced display name -- so this file leaks exactly the same
+    // "who you've talked to" information ContactsEncryption protects,
+    // just via a path the library manages itself. Must happen after
+    // loadOrCreateIdentity() since decrypting needs the identity's private
+    // key. See KnownDestEncryption.h for the full rationale.
+    RNS::Identity::known_destinations_crypto(
+        [this](const RNS::Bytes& in, RNS::Bytes& out) {
+            return KnownDestEncryption::encrypt(_identity, in, out);
+        },
+        [this](const RNS::Bytes& in, RNS::Bytes& out) {
+            return KnownDestEncryption::decryptOrPassthrough(_identity, in, out);
+        });
+
+    // Load persisted known destinations so Identity::recall() works
+    // immediately after reboot for previously-seen nodes.
+    RNS::Identity::load_known_destinations();
+
+    // One-time re-save so a pre-encryption plaintext file (or one written
+    // before this device ever had a password) gets upgraded immediately --
+    // same migrate-on-load intent as contacts/settings, but gated by its
+    // own flag rather than run unconditionally: unlike contacts/settings,
+    // save_known_destinations() always re-serializes and re-encrypts the
+    // whole table (up to RNS_KNOWN_DESTINATIONS_MAX entries) rather than
+    // no-op'ing once nothing changed, so doing this on every boot forever
+    // is pure wasted flash-write and crypto cost after the first boot.
+    {
+        Preferences kp;
+        kp.begin(NVS_NAMESPACE, true);
+        bool knownDestMigrated = kp.getBool("kd_migrated", false);
+        kp.end();
+        if (!knownDestMigrated) {
+            RNS::Identity::save_known_destinations();
+            Preferences kp2;
+            kp2.begin(NVS_NAMESPACE, false);
+            kp2.putBool("kd_migrated", true);
+            kp2.end();
+        }
     }
 
     // Create LXMF delivery destination

@@ -132,10 +132,20 @@ incrementally (`_unread[peerHex]++` on receive, reset in `markRead()`).
 
 ## MessageStore: on-disk layout
 
-Each conversation lives in its own directory, named by the peer's
-16-hex-character truncated destination hash:
-`/messages/<peerHex16>/` (flash) and `/ratcom/messages/<peerHex16>/`
-(SD, when present). Within that directory, each message is one file:
+Each conversation lives in its own directory: `/messages/<token>/`
+(flash) and `/ratcom/messages/<token>/` (SD, when present). `<token>` is
+**not** the peer's destination hash or a truncation of it —
+`MessageStore::dirTokenForPeer()` derives it as an identity-keyed blind
+index (HMAC-SHA256 of the hash, HKDF info `rscardputer.msgdir.v1`) so a
+directory listing alone doesn't hand an attacker with disk access the
+exact set of peers this device has message history with. See
+[encryption-contacts-settings.md](encryption-contacts-settings.md#filenames-are-not-the-hash-either)
+for why that distinction matters even though the hash itself is public
+Reticulum discovery data. Every message file inside still carries the
+full src/dst hex in its own (encrypted) content, so
+`resolveConversationPeerHex()` recovers the real peer for a directory by
+peeking at one, same as it always has — nothing about *that* changed.
+Within the directory, each message is one file:
 
 ```
 <13-digit zero-padded receive counter>_<i|o>.json
@@ -155,6 +165,16 @@ A separate hidden `.read_ctr` file per conversation stores "the highest
 receive counter the user has seen" — comparing a message's own counter
 against it is how `loadConversation()` decides each message's `read`
 flag, with no JSON parsing required just to compute unread state.
+
+Message content is encrypted, but LittleFS/FAT still stamp each file
+with its real wall-clock write time at the filesystem level — metadata a
+raw dump can read without decrypting anything. `WriteQueue::processJob()`
+resets that timestamp to a fixed, non-informative value on every write
+via `FlashStore::scrubTimestamp()`/`SDStore::scrubTimestamp()`, and
+`updateMessageStatusByCounter()` does the same after rewriting a file for
+a delivery/read-receipt status change. See
+[storage-layer.md](storage-layer.md#message-file-timestamps) for how the
+scrub works and why the Arduino File API can't do it directly.
 
 ### Capacity and the flash/SD split
 

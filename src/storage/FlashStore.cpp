@@ -1,4 +1,5 @@
 #include "FlashStore.h"
+#include <utime.h>
 
 // Global LittleFS mutex — prevents cross-task corruption
 SemaphoreHandle_t FlashStore::_mutex = nullptr;
@@ -316,6 +317,14 @@ bool FlashStore::writeDirect(const char* path, const uint8_t* data, size_t len) 
     f.flush();
     f.close();
     return written == len;
+}
+
+bool FlashStore::scrubTimestamp(const char* path) {
+    if (!_ready) return false;
+    FSLock lock(_mutex);
+    String full = String(FLASH_BASE_PATH) + path;
+    struct utimbuf times = {0, 0};  // epoch — same value for every file, carries no information
+    return utime(full.c_str(), &times) == 0;
 }
 
 String FlashStore::readString(const char* path) {

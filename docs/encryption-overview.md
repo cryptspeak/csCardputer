@@ -14,52 +14,47 @@ proof-of-concept in [konsumer](https://github.com/konsumer)'s
 [arduino-rns-encrypted-store](https://github.com/konsumer/arduino-rns-encrypted-store)
 and [arduino-rns-password](https://github.com/konsumer/arduino-rns-password).
 
-## What's protected, and since when
+## What's protected
 
 | Data category | Storage | Encrypted? | Module |
 |---|---|---|---|
-| Identity private key | Flash, NVS, SD | Yes (original Cryptspeak feature) | [`IdentityCrypto`](encryption-identity.md) |
-| LXMF message bodies | Flash, SD | Yes (original Cryptspeak feature) | [`MessageEncryption`](encryption-messages.md) |
-| Saved contacts + name cache | Flash, SD | **Yes — added in this change** | [`ContactsEncryption`](encryption-contacts-settings.md) |
-| Device settings (WiFi passwords, TCP hubs, radio config, display name) | Flash, NVS, SD | **Yes — added in this change** | [`SettingsEncryption`](encryption-contacts-settings.md) |
+| Identity private key | Flash, NVS, SD | Yes | [`IdentityCrypto`](encryption-identity.md) |
+| LXMF message bodies | Flash, SD | Yes | [`MessageEncryption`](encryption-messages.md) |
+| Saved contacts + name cache | Flash, SD | Yes | [`ContactsEncryption`](encryption-contacts-settings.md) |
+| Device settings (WiFi passwords, TCP hubs, radio config, display name) | Flash, NVS, SD | Yes | [`SettingsEncryption`](encryption-contacts-settings.md) |
+| microReticulum's `known_destinations` table (announced peer names, cached independently of the app's own contacts/name-cache files) | Flash | Yes | [`KnownDestEncryption`](encryption-known-destinations.md) |
 | Announces / destination hashes on the air | — | Not applicable — public by Reticulum's own design | — |
 | Reticulum/LXMF packets in flight | — | Unchanged — protocol's own crypto | — |
 
-Before this change, contacts and settings were the two unencrypted gaps:
-an attacker with physical access to the SD card or flash chip could read
-every saved contact's name, plus every configured WiFi password and TCP
-hub address, even though the identity and message history next to them
-were already protected. See [threat-model.md](threat-model.md) for the
-full reasoning.
+Every category above went through the same envelope; there is no
+unencrypted category left except the color theme (see
+[theme-config.md](theme-config.md) for why that one is deliberately
+excluded). See [threat-model.md](threat-model.md) for the full
+adversarial reasoning.
 
-## One engine, four domains
+## One engine, five domains
 
-All four protected categories — identity, messages, contacts, settings —
-use the **same authenticated-encryption envelope** (AES-256-CTR +
-HMAC-SHA256, encrypt-then-MAC). Identity has its own implementation
-(`IdentityCrypto`) because it alone derives its key from the user's
-*password* via PBKDF2 (it has to — the identity key is the thing that
-makes every other domain's key possible). The other three domains derive
-their keys from the *identity's private key* via HKDF, so they share one
-generic implementation:
+All five protected categories — identity, messages, contacts, settings,
+known-destinations — use the **same authenticated-encryption envelope**
+(AES-256-CTR + HMAC-SHA256, encrypt-then-MAC). Identity has its own
+implementation (`IdentityCrypto`) because it alone derives its key from
+the user's *password* via PBKDF2 (it has to — the identity key is the
+thing that makes every other domain's key possible). The other four
+domains derive their keys from the *identity's private key* via HKDF, so
+they share one generic implementation:
 
 ```
-src/storage/AtRestCrypto.{h,cpp}      ← shared envelope engine
-src/storage/MessageEncryption.{h,cpp} ← domain: messages   (magic "RMS1", pre-existing)
-src/storage/ContactsEncryption.{h,cpp}← domain: contacts   (magic "RCN1", added here)
-src/storage/SettingsEncryption.{h,cpp}← domain: settings   (magic "RUC1", added here)
+src/storage/AtRestCrypto.{h,cpp}       ← shared envelope engine
+src/storage/MessageEncryption.{h,cpp}  ← domain: messages           (magic "RMS1")
+src/storage/ContactsEncryption.{h,cpp} ← domain: contacts           (magic "RCN1")
+src/storage/SettingsEncryption.{h,cpp} ← domain: settings           (magic "RUC1")
+src/storage/KnownDestEncryption.{h,cpp}← domain: known-destinations (magic "RKD1")
 ```
 
-`AtRestCrypto` is a direct generalization of the original
-`MessageEncryption` implementation — the encrypt/decrypt/MAC logic is
-unchanged from the version that's been protecting messages; it was just
-factored so a 4-byte magic and an HKDF "info" string become parameters
-instead of compile-time constants. `MessageEncryption` itself was **not**
-touched, byte-for-byte, so there is zero behavior change or regression
-risk to the already-working message encryption path — it's the same
-file, doing the same thing, it just happens to share code with the two
-new domains via the engine rather than duplicating ~150 lines of crypto
-three times over.
+`AtRestCrypto` is the shared envelope engine: the same encrypt/decrypt/MAC
+logic used by every domain, parameterized by a 4-byte magic and an HKDF
+"info" string per domain rather than duplicating the ~150 lines of crypto
+per file.
 
 ### Why separate domains instead of one shared key?
 
@@ -81,9 +76,10 @@ The `info` string namespaces the derivation per domain:
 | Messages | `RMS1` | `rscardputer.msg.v1` |
 | Contacts | `RCN1` | `rscardputer.contacts.v1` |
 | Settings | `RUC1` | `rscardputer.settings.v1` |
+| Known-destinations | `RKD1` | `rscardputer.knowndest.v1` |
 
 A key derived for one domain cannot decrypt another, even though all
-three ultimately come from the same identity private key. This means a
+four ultimately come from the same identity private key. This means a
 bug or future attack that recovers the message key, say, doesn't also
 hand over your WiFi password.
 
@@ -137,6 +133,8 @@ than introduce a second authenticated-encryption construction.
 - Reviewing the new contacts/settings work specifically?
   [encryption-contacts-settings.md](encryption-contacts-settings.md) has
   the call-site-level detail.
+- Curious how microReticulum's own `known_destinations` table got closed
+  off? [encryption-known-destinations.md](encryption-known-destinations.md).
 - Want the adversarial framing? [threat-model.md](threat-model.md).
 - Curious about the optional duress password? It reuses `IdentityCrypto`'s
   wrap/unwrap envelope for an unrelated purpose (a verifier, not a key) —

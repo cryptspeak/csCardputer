@@ -9,6 +9,7 @@
 #include <set>
 #include <unordered_map>
 #include <functional>
+#include <utility>
 #include "config/Config.h"
 
 class SDStore;
@@ -121,7 +122,12 @@ public:
     void rebuildIndex();
 
 private:
-    void saveContact(const DiscoveredNode& node);
+    // Returns true only if the contact was actually persisted to every
+    // storage backend that's currently ready -- callers (saveContacts())
+    // rely on this to decide whether it's safe to remove that contact's
+    // old legacy-named file, and whether the one-time filename migration
+    // can be marked complete.
+    bool saveContact(const DiscoveredNode& node);
     void removeContact(const std::string& hexHash);
     void bumpNameVersion() { _nameVersion++; if (_onNameChanged) _onNameChanged(); }
 
@@ -138,6 +144,26 @@ private:
     const RNS::Identity* _identity = nullptr;
     RNS::Bytes _localDestHash;
     bool _contactsDirty = false;
+    // Contact files found under their old hash-derived filename during
+    // loadContacts() -- queued for removal once saveContacts() confirms
+    // the corresponding new-named file was actually written, so a stale
+    // duplicate carrying the peer's hash in its own filename doesn't just
+    // sit there forever. hexHash is kept alongside the path so
+    // saveContacts() can skip removing a peer's legacy file if that
+    // peer's new-named save failed -- otherwise a partial failure could
+    // delete the only remaining copy of that contact.
+    struct StaleContactFile {
+        bool useSD;
+        String path;
+        std::string hexHash;
+    };
+    std::vector<StaleContactFile> _staleContactFiles;
+    // True only while the one-time contactFileToken() migration hasn't
+    // been confirmed complete yet (NVS "contacts_tokenized") -- see
+    // loadContacts()/saveContacts(). Once set, later boots skip
+    // recomputing a blind index per contact file just to confirm nothing
+    // needs migrating.
+    bool _contactsTokenizePending = false;
     // mutable: lookupName() is logically const (it answers "what name do we
     // currently know for this hash") but opportunistically self-heals this
     // cache from RNS::Identity::recall_app_data() when it resolves a name

@@ -1,42 +1,30 @@
 # Contacts & Settings Encryption
 
-This is the gap closed in this branch. Before this change, the audit in
-this repo's history found that identity and messages were properly
-encrypted and wired end-to-end, but **contacts** and **device settings**
-were stored as plain JSON — including saved contact names and, in
-settings, WiFi AP/STA passwords and TCP hub addresses.
+Contacts and device settings are encrypted at rest the same way identity
+and messages are — see [encryption-overview.md](encryption-overview.md)
+for the shared `AtRestCrypto` envelope. Each has its own magic bytes and
+HKDF info string so a key derived for one can't decrypt another.
 
-Both new domains reuse the shared `AtRestCrypto` envelope engine described
-in [encryption-overview.md](encryption-overview.md), with their own magic
-bytes and HKDF info string so their keys can't cross-decrypt each other
-or the message/identity domains.
+## Upgrade paths
 
-## This covers two distinct upgrade paths, not just one
-
-It's worth being explicit about this because it's easy to assume the
-migration only matters for the upstream/non-encrypted → Cryptspeak jump.
-It actually covers two separate populations of existing devices:
+Two populations of existing devices reach the current, fully-encrypted
+state differently:
 
 1. **Upstream (non-Cryptspeak) devices** — nothing is encrypted yet.
    `ReticulumManager::probeIdentityState()` returns `LEGACY_PLAINTEXT`,
-   `legacyIdentityLoaded()` becomes `true`, and the existing
-   identity/message migration flow (opt-in, with a progress screen for
-   messages — see [boot-sequence.md](boot-sequence.md)) runs.
-2. **Existing Cryptspeak devices** — identity and messages are
-   *already* encrypted from a prior version of this firmware, but
-   contacts and settings were still plaintext (the gap this branch
-   closes). `probeIdentityState()` returns `ENCRYPTED`, the normal
-   unlock path runs, and `legacyIdentityLoaded()` stays `false` — so the
-   message-migration prompt correctly does **not** fire again for these
-   users.
+   `legacyIdentityLoaded()` becomes `true`, and the identity/message
+   migration flow runs (opt-in, with a progress screen for messages —
+   see [boot-sequence.md](boot-sequence.md)).
+2. **Existing Cryptspeak devices** — identity and messages are already
+   encrypted, but contacts and settings predate this feature and are
+   still plaintext. `probeIdentityState()` returns `ENCRYPTED`, the
+   normal unlock path runs, and `legacyIdentityLoaded()` stays `false`,
+   so the message-migration prompt does not fire for these users.
 
-The contacts/settings re-encryption in `main.cpp` is deliberately **not**
-gated on `legacyIdentityLoaded()`. It's gated only on
-`encryptionEnabled()` — "is a valid identity loaded right now" — which is
-true in both cases above (and is a no-op the moment everything is already
-encrypted, every boot after the first one). One mechanism, both upgrade
-paths, no separate code path needed for "upgrading from an
-already-partially-encrypted install" versus "upgrading from plaintext."
+The contacts/settings re-encryption in `main.cpp` is gated only on
+`encryptionEnabled()` ("is a valid identity loaded right now"), which is
+true in both cases above and a no-op once everything is already
+encrypted. One mechanism covers both upgrade paths.
 
 ## Contacts
 
@@ -45,48 +33,70 @@ Wired into: [`src/reticulum/AnnounceManager.cpp`](../src/reticulum/AnnounceManag
 
 Domain: magic `RCN1`, HKDF info `rscardputer.contacts.v1`.
 
-`AnnounceManager` persists two kinds of data, both now encrypted the same
-way:
+`AnnounceManager` persists two kinds of data, both encrypted the same way:
 
-- **Per-contact files** — one JSON file per saved contact, named by the
-  first 16 hex characters of the destination hash (e.g.
-  `a1b2c3d4e5f6a7b8.json`), under `/contacts` (flash) and `/ratcom/contacts`
-  (SD). Content is `{"hash": "...", "name": "..."}`.
-- **Name cache** (`names.json`) — a hash→display-name map used so names
+- **Per-contact files** — one JSON file per saved contact, under
+  `/contacts` (flash) and `/ratcom/contacts` (SD). Content is
+  `{"hash": "...", "name": "..."}`. The filename is **not** the hash —
+  see below.
+- **Name cache** (`names.json`) — a hash→display-name map so names
   survive reboots even for peers that haven't been explicitly saved as
   contacts.
 
-`AnnounceManager` gained:
+`AnnounceManager` exposes:
 
 ```cpp
 void setIdentity(const RNS::Identity* identity);
 bool encryptionEnabled() const;
 ```
 
-mirroring `MessageStore`'s pattern exactly. Two private free functions in
+mirroring `MessageStore`'s pattern. Two private free functions in
 `AnnounceManager.cpp`, `maybeEncryptContact()` / `maybeDecryptContact()`,
-wrap every read/write of both contact files and the name cache — same
-shape as `MessageStore`'s `maybeEncrypt()`/`maybeDecrypt()`.
+wrap every read/write of both contact files and the name cache — the
+same shape as `MessageStore`'s `maybeEncrypt()`/`maybeDecrypt()`.
 
-### What's *not* encrypted, and why that's fine
+### Filenames are not the hash either
 
-The **filename** of a contact file is still the hash prefix in plaintext
-— an attacker with disk access can see *that* you've saved some hash as
-a contact, just not what name you gave it. This is an intentional
-non-issue: destination hashes are derived from identities that get
-announced over the air, so they're already public information by
-Reticulum's own design (see [threat-model.md](threat-model.md)). The
-thing actually worth protecting — the human-readable name you privately
-attached to that hash — is what the encrypted file content protects.
+Contact files and conversation directories are named with an
+identity-keyed blind index, not the peer's destination hash or a
+truncation of it. A directory listing alone — no decryption required —
+would otherwise hand an attacker with disk access the exact set of
+hashes saved as contacts, which is a stronger signal than "a hash was
+announced": destination hashes are broadcast over the air as part of
+Reticulum's own discovery (see [threat-model.md](threat-model.md)), but
+which of those hashes *this device* specifically saved is not.
+
+`saveContact()`/`removeContact()` name each file with
+`contactFileToken()` (`AnnounceManager.cpp`): HMAC-SHA256 of the hash
+under its own HKDF info string (`rscardputer.contactfile.v1`),
+hex-encoded and truncated to 16 characters. Same width and lookup cost
+as a truncated hash, same determinism (a given peer always lands on the
+same filename across reboots), but only this device's identity can
+compute or invert the mapping. `loadContacts()` never relies on the
+filename for anything besides iterating the directory — every field it
+needs comes from the decrypted content.
+
+Existing installs migrate automatically: `loadContacts()` flags any file
+whose name doesn't match its contact's recomputed token, and the next
+`saveContacts()` (which already runs on every boot when encryption is
+enabled — see "Migration" below) writes the correctly-named copy and
+removes the stale one.
+
+`MessageStore` conversation directories (`/messages/<hash16>/`) had the
+same property and use the same fix, `dirTokenForPeer()`, sharing
+`AtRestCrypto::blindIndexHex()` with its own info string
+(`rscardputer.msgdir.v1`). `MessageStore::migrateConversationDirTokens()`
+renames each old-named directory once, on the first boot after
+upgrading — a directory rename is a single directory-entry update on
+both LittleFS and FAT, not a per-message-file operation.
 
 ### Migration
 
 Contacts and the name cache are capped at a small size
 (`RSCARDPUTER_MAX_NODES = 50`), so unlike message migration there's no
-need for a user-facing opt-in/progress flow. `main.cpp` simply calls
-`saveContacts()` and `saveNameCache()` once, immediately after
-`setIdentity()` + `loadContacts()`/`loadNameCache()`, whenever encryption
-is enabled:
+user-facing opt-in/progress flow. `main.cpp` calls `saveContacts()` and
+`saveNameCache()` once, immediately after `setIdentity()` +
+`loadContacts()`/`loadNameCache()`, whenever encryption is enabled:
 
 ```cpp
 announceManager->setIdentity(&rns.identity());
@@ -113,32 +123,29 @@ Domain: magic `RUC1`, HKDF info `rscardputer.settings.v1`.
 
 `UserConfig` persists one JSON blob (`UserSettings`) across three tiers:
 SD (`/ratcom/config/user.json`), flash (`/config/user.json`), and NVS
-(namespace `ratcom_cfg`, key `json`, as a bulletproof backup that survives
-flash corruption). That blob includes the WiFi AP/STA SSID+password, TCP
-hub host/port list, LoRa radio parameters, display name, and display/audio
+(namespace `ratcom_cfg`, key `json`, as a backup that survives flash
+corruption). That blob includes the WiFi AP/STA SSID+password, TCP hub
+host/port list, LoRa radio parameters, display name, and display/audio
 preferences.
 
-`UserConfig` gained the same `setIdentity()` / `encryptionEnabled()` pair,
-plus two private helper methods, `maybeEncrypt()` / `maybeDecrypt()`, used
-by every load/save tier (`load(FlashStore&)`, `save(FlashStore&)`,
+`UserConfig` exposes the same `setIdentity()` / `encryptionEnabled()`
+pair, plus two private helpers, `maybeEncrypt()` / `maybeDecrypt()`,
+used by every load/save tier (`load(FlashStore&)`, `save(FlashStore&)`,
 `load(SDStore&, FlashStore&)`, `save(SDStore&, FlashStore&)`).
 
-### The NVS binary-safety fix
+### NVS binary safety
 
-This is the one part of this change that isn't a pure copy of the
-message-encryption pattern. The NVS backup was previously stored with
-`Preferences::putString()`/`getString()` — fine for plaintext JSON (which
-is null-terminated, printable text), but an encrypted envelope is binary
-and can legitimately contain `0x00` bytes anywhere in the ciphertext or
-MAC. A `0x00` byte would silently truncate a `putString()`-backed NVS
-entry.
+The NVS backup is stored with `Preferences::putBytes()`/`getBytes()`,
+not `putString()`/`getString()`. An encrypted envelope is binary and can
+legitimately contain `0x00` bytes anywhere in the ciphertext or MAC — a
+`0x00` byte would silently truncate a `putString()`-backed entry.
+`IdentityCrypto`'s NVS path uses the same byte-exact approach for the
+identity blob.
 
-`saveToNVS()`/`loadFromNVS()` were switched to `putBytes()`/`getBytes()`,
-which store/retrieve an exact byte length instead of relying on null
-termination — the same approach `IdentityCrypto`'s NVS path already used
-for the identity blob. To avoid losing a pre-upgrade NVS backup written
-under the old `putString()` format, `loadFromNVS()` tries `getBytes()`
-first and falls back to `getString()` if no `PT_BLOB` entry is found:
+`loadFromNVS()` tries `getBytes()` first and falls back to `getString()`
+if no byte-typed entry is found, so a pre-upgrade NVS backup written
+under the old string format still loads on the first boot after
+upgrading:
 
 ```cpp
 static String loadFromNVS() {
@@ -153,7 +160,7 @@ static String loadFromNVS() {
         out.reserve(len);
         for (size_t i = 0; i < len; i++) out.concat((char)buf[i]);
     } else {
-        // legacy PT_STR entry from a pre-encryption build
+        // legacy string-typed entry from a pre-encryption build
         out = prefs.getString(NVS_KEY, "");
     }
     prefs.end();
@@ -161,8 +168,16 @@ static String loadFromNVS() {
 }
 ```
 
-The next successful save rewrites the NVS entry as bytes, so this
+The next successful save rewrites the NVS entry as bytes, so the
 fallback only matters for the one boot right after upgrading.
+
+> NVS key names are capped at 15 characters
+> (`NVS_KEY_NAME_MAX_SIZE - 1`) — `Preferences::putBool()`/`putBytes()`
+> silently refuse anything longer, so a migration-complete flag under an
+> over-length key never persists and that migration quietly re-runs
+> every boot. Keep new NVS keys at 15 characters or under. See
+> [storage-layer.md](storage-layer.md#nvs-key-length) for the specific
+> keys this bit twice.
 
 ### Migration
 

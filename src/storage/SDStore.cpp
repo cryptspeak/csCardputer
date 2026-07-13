@@ -1,6 +1,15 @@
 #include "SDStore.h"
 #include "config/Config.h"
 #include "hal/SharedSPIBus.h"
+#include <utime.h>
+
+namespace {
+// Matches the mountpoint SD.begin() uses below (no explicit mountpoint arg
+// passed to SD.begin() -> library default). Needed here because utime() is
+// a raw POSIX call outside the Arduino FS wrapper, which otherwise hides the
+// mountpoint prefix from callers using SDStore's app-relative paths.
+constexpr const char* SD_BASE_PATH = "/sd";
+}  // namespace
 
 bool SDStore::begin(SPIClass* spi, int csPin) {
     if (!spi) return false;
@@ -110,6 +119,13 @@ bool SDStore::removeDir(const char* path) {
     return SD.rmdir(path);
 }
 
+bool SDStore::rename(const char* from, const char* to) {
+    if (!_ready) return false;
+    SharedSPILock lock;
+    if (!lock.locked()) return false;
+    return SD.rename(from, to);
+}
+
 bool SDStore::readFile(const char* path, uint8_t* buffer, size_t maxLen, size_t& bytesRead) {
     bytesRead = 0;
     if (!_ready) return false;
@@ -195,6 +211,15 @@ bool SDStore::writeDirect(const char* path, const uint8_t* data, size_t len) {
     f.flush();
     f.close();
     return written == len;
+}
+
+bool SDStore::scrubTimestamp(const char* path) {
+    if (!_ready) return false;
+    SharedSPILock lock;
+    if (!lock.locked()) return false;
+    String full = String(SD_BASE_PATH) + path;
+    struct utimbuf times = {0, 0};  // epoch — same value for every file, carries no information
+    return utime(full.c_str(), &times) == 0;
 }
 
 String SDStore::readString(const char* path) {

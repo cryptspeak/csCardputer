@@ -5,6 +5,43 @@ Versioning is independent of upstream
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) — see
 `docs/firmware-architecture.md`.
 
+## v0.1.3 — Known-Destinations Encryption & Storage Metadata Hardening
+
+### Added
+
+- **Security:** microReticulum's own `known_destinations` table — which
+  independently caches every announced peer's display name, even for peers
+  never saved as a contact — is now encrypted at rest the same way contacts,
+  settings, and messages already were.
+
+### Fixed
+
+- **Security:** contact files and message-conversation directories were
+  still named using a prefix of the peer's destination hash in plaintext.
+  A directory listing alone, with no decryption needed, revealed exactly
+  which peers were saved as contacts or messaged. Both are now named with
+  an identity-keyed blind index instead; existing installs migrate
+  automatically.
+- **Security:** that migration could, under an I/O failure (e.g. an SD
+  card removed mid-boot), mark itself complete before every legacy-named
+  contact file was actually cleaned up, potentially leaving one behind
+  indefinitely. It now retries automatically until every file is
+  confirmed migrated.
+- **Security:** message files are encrypted, but the filesystem itself
+  stamped every file with its real write time regardless — recoverable
+  from a raw dump without decrypting anything. Timestamps are now reset
+  to a fixed, non-informative value on every write, with a one-time
+  cleanup pass for files written before this fix.
+- **UI:** the boot screen could briefly show the default color theme
+  before switching to a saved custom theme, if that theme only existed on
+  the SD card and not on flash. Flash now gets backfilled automatically,
+  closing the gap after one more boot.
+- Two internal one-time migration flags used key names longer than the
+  storage layer's 15-character limit, so they silently never saved and
+  re-ran their (harmless but wasteful) checks on every boot.
+
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.1.2...v0.1.3
+
 ## v0.1.2 — TCP Stability, Name Persistence & Identity Verification
 
 ### Fixed

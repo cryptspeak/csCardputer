@@ -113,6 +113,12 @@ void WriteQueue::processJob(const WriteJob& job) {
         bool ok = _sd->writeDirect(job.sdPath, (const uint8_t*)job.data.c_str(), job.data.length());
         if (!ok) {
             Serial.printf("[WRITEQ] SD write FAILED: %s\n", job.sdPath);
+        } else {
+            // Message file content is encrypted, but FAT stamps every file
+            // with the real wall-clock write time regardless — scrub it so
+            // a raw card dump can't reconstruct exact message arrival times
+            // without decrypting anything. See SDStore::scrubTimestamp().
+            _sd->scrubTimestamp(job.sdPath);
         }
     }
 
@@ -131,6 +137,10 @@ void WriteQueue::processJob(const WriteJob& job) {
         bool ok = _flash->writeDirect(job.flashPath, (const uint8_t*)job.data.c_str(), job.data.length());
         if (!ok) {
             Serial.printf("[WRITEQ] Flash write FAILED: %s\n", job.flashPath);
+        } else {
+            // Same rationale as the SD branch above — LittleFS also stamps
+            // real wall-clock write time per file.
+            _flash->scrubTimestamp(job.flashPath);
         }
     }
 }

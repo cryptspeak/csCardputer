@@ -17,11 +17,20 @@ public:
     bool writeDirect(const char* path, const uint8_t* data, size_t len);
     String readString(const char* path);
 
+    // Resets a file's on-disk mtime/atime to a fixed, non-informative value
+    // (unix epoch) — FAT timestamps a file with real wall-clock time at
+    // write, which for per-message files means "when this message arrived"
+    // is readable straight off the card, no decryption required. See
+    // WriteQueue::processJob(), the only caller.
+    bool scrubTimestamp(const char* path);
+
     bool ensureDir(const char* path);
     bool exists(const char* path);
     bool remove(const char* path);
     File openDir(const char* path);
     bool removeDir(const char* path);
+    bool rename(const char* from, const char* to);
+    bool rename(const String& f, const String& t) { return rename(f.c_str(), t.c_str()); }
     bool readFile(const char* path, uint8_t* buffer, size_t maxLen, size_t& bytesRead);
 
     bool isReady() const { return _ready; }

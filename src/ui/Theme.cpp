@@ -305,6 +305,23 @@ bool load(FlashStore* flash, SDStore* sd) {
 
     apply(parsed);
     Serial.printf("[THEME] Loaded '%s' from %s\n", g_current.name.c_str(), fromSD ? "SD" : "flash");
+
+    // Backfill flash from an SD-only theme. The very first Theme::load() of
+    // boot runs flash-only, before SD is mounted (see main.cpp) — if the
+    // saved theme only exists on SD (e.g. it was set before this backfill
+    // existed, or a Settings save happened while flash was briefly
+    // unavailable), that early call finds nothing and the boot screen
+    // renders the compiled-in default palette for the ~1s it takes to get
+    // through the intro animation and radio init before SD mounts and this
+    // function runs again. Comparing against flash's current copy first
+    // keeps this a no-op on every normal boot once the two tiers agree.
+    if (fromSD && flash) {
+        String flashRaw = flash->readString(PATH_THEME_CONFIG);
+        if (flashRaw != raw) {
+            flash->writeString(PATH_THEME_CONFIG, raw);
+        }
+    }
+
     return true;
 }
 
