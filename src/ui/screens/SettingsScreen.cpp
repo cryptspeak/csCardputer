@@ -820,7 +820,13 @@ void SettingsScreen::commitEdit(const std::string& value) {
                 if (v >= 5 && v <= 8) s.loraCR = (uint8_t)v;
                 break;
             case 4:  // TX Power
-                if (v >= -9 && v <= LORA_MAX_TX_POWER) s.loraTxPower = (int8_t)v;
+                if (v >= -3 && v <= LORA_MAX_TX_POWER) {
+                    s.loraTxPower = (int8_t)v;
+                } else {
+                    _editInput.setError(true);
+                    showToast("Only -3 to 20 dBm");
+                    return;  // stay in edit mode — rejection must be visible, not silent
+                }
                 break;
         }
         applyAndSave();

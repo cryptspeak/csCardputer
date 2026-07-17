@@ -50,15 +50,34 @@ void RadioSetupScreen::render(M5Canvas& canvas) {
         y += Theme::CHAR_H + 8;
         canvas.setTextColor(Theme::MUTED);
         canvas.drawString("Enter=save  Esc=cancel", 8, y);
-        return;
+    } else {
+        Theme::useSmallFont(canvas);
+        canvas.setTextColor(Theme::MUTED);
+        canvas.drawString("Set up your LoRa parameters", 8, y);
+        y += Theme::CHAR_H + 4;
+
+        _list.render(canvas, 0, y, Theme::CONTENT_W, Theme::CONTENT_H - (y - Theme::CONTENT_Y));
     }
 
-    Theme::useSmallFont(canvas);
-    canvas.setTextColor(Theme::MUTED);
-    canvas.drawString("Set up your LoRa parameters", 8, y);
-    y += Theme::CHAR_H + 4;
+    // Toast overlay (drawn on top of everything)
+    if (_toastMessage && millis() < _toastUntil) {
+        int tw = strlen(_toastMessage) * Theme::CHAR_W + 12;
+        int th = Theme::CHAR_H + 8;
+        int tx = (Theme::CONTENT_W - tw) / 2;
+        int ty = Theme::CONTENT_Y + Theme::CONTENT_H - th - 4;
+        canvas.fillRoundRect(tx, ty, tw, th, 3, Theme::SELECTION_BG);
+        canvas.drawRoundRect(tx, ty, tw, th, 3, Theme::PRIMARY);
+        canvas.setTextColor(Theme::PRIMARY);
+        canvas.setCursor(tx + 6, ty + 4);
+        canvas.print(_toastMessage);
+    } else {
+        _toastMessage = nullptr;
+    }
+}
 
-    _list.render(canvas, 0, y, Theme::CONTENT_W, Theme::CONTENT_H - (y - Theme::CONTENT_Y));
+void RadioSetupScreen::showToast(const char* msg, unsigned long durationMs) {
+    _toastMessage = msg;
+    _toastUntil = millis() + durationMs;
 }
 
 void RadioSetupScreen::applyToRadio() {
@@ -132,7 +151,13 @@ void RadioSetupScreen::commitEdit(const std::string& value) {
             if (v >= 5 && v <= 8) s.loraCR = (uint8_t)v;
             break;
         case FIELD_TXPOWER:
-            if (v >= -9 && v <= LORA_MAX_TX_POWER) s.loraTxPower = (int8_t)v;
+            if (v >= -3 && v <= LORA_MAX_TX_POWER) {
+                s.loraTxPower = (int8_t)v;
+            } else {
+                _editInput.setError(true);
+                showToast("Only -3 to 20 dBm");
+                return;  // stay in edit mode — rejection must be visible, not silent
+            }
             break;
     }
 

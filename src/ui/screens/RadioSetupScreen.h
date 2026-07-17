@@ -34,6 +34,7 @@ private:
     void startEditing(int field);
     void commitEdit(const std::string& value);
     void applyToRadio();
+    void showToast(const char* msg, unsigned long durationMs = 1500);
 
     UserConfig* _config = nullptr;
     SX1262* _radio = nullptr;
@@ -44,4 +45,7 @@ private:
     TextInput _editInput;
     int _editField = -1;
     std::string _editLabel;
+
+    unsigned long _toastUntil = 0;
+    const char* _toastMessage = nullptr;
 };

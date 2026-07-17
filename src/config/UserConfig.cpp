@@ -60,7 +60,7 @@ void UserConfig::sanitizeSettings() {
     _settings.loraSF = constrain(_settings.loraSF, 5, 12);
     _settings.loraBW = constrain(_settings.loraBW, 7800UL, 500000UL);
     _settings.loraCR = constrain(_settings.loraCR, 5, 8);
-    _settings.loraTxPower = constrain(_settings.loraTxPower, -9, LORA_MAX_TX_POWER);
+    _settings.loraTxPower = constrain(_settings.loraTxPower, -3, LORA_MAX_TX_POWER);
 
     _settings.screenDimTimeout = constrain(_settings.screenDimTimeout, 5, 3600);
     _settings.screenOffTimeout = constrain(_settings.screenOffTimeout, 10, 7200);

@@ -25,6 +25,11 @@ public:
     // Renders every character as '*' instead of the actual text — for
     // password-style fields.
     void setMasked(bool masked) { _masked = masked; }
+    // Flags the last-submitted value as rejected — renders the field in the
+    // error color until the user edits it again. Callers pair this with a
+    // toast and keep editing active instead of closing the field, so a
+    // rejected submission never looks like it silently applied.
+    void setError(bool error) { _error = error; }
 
     // Callback when Enter is pressed
     using SubmitCallback = std::function<void(const std::string&)>;
@@ -39,5 +44,6 @@ private:
     int _maxLength = 200;
     bool _numericOnly = false;
     bool _masked = false;
+    bool _error = false;
     SubmitCallback _submitCb;
 };

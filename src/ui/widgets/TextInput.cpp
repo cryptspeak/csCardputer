@@ -9,6 +9,7 @@ void TextInput::clear() {
     _text.clear();
     _cursorPos = 0;
     _numericOnly = false;
+    _error = false;
 }
 
 bool TextInput::handleKey(const KeyEvent& event) {
@@ -28,6 +29,7 @@ bool TextInput::handleKey(const KeyEvent& event) {
             _text.erase(_cursorPos - 1, 1);
             _cursorPos--;
         }
+        _error = false;
         return true;
     }
 
@@ -40,6 +42,7 @@ bool TextInput::handleKey(const KeyEvent& event) {
             _text.insert(_text.begin() + _cursorPos, event.character);
             _cursorPos++;
         }
+        _error = false;
         return true;
     }
 
@@ -49,6 +52,7 @@ bool TextInput::handleKey(const KeyEvent& event) {
             _text.insert(_text.begin() + _cursorPos, ' ');
             _cursorPos++;
         }
+        _error = false;
         return true;
     }
 
@@ -60,7 +64,7 @@ void TextInput::render(M5Canvas& canvas, int x, int y, int w) {
 
     // Background and border
     canvas.fillRect(x, y, w, h, Theme::BG_ELEVATED);
-    canvas.drawRect(x, y, w, h, _active ? Theme::PRIMARY : Theme::BORDER);
+    canvas.drawRect(x, y, w, h, _error ? Theme::ERROR : (_active ? Theme::PRIMARY : Theme::BORDER));
 
     // Prompt
     canvas.setTextSize(Theme::FONT_SIZE);
@@ -73,7 +77,7 @@ void TextInput::render(M5Canvas& canvas, int x, int y, int w) {
     int maxChars = textAreaW / Theme::CHAR_W;
     int textX = x + 2 + 2 * Theme::CHAR_W;
 
-    canvas.setTextColor(Theme::TEXT_PRIMARY);
+    canvas.setTextColor(_error ? Theme::ERROR : Theme::TEXT_PRIMARY);
     if ((int)_text.length() > maxChars) {
         int start = _cursorPos - maxChars + 1;
         if (start < 0) start = 0;

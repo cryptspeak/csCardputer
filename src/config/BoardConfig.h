@@ -25,8 +25,12 @@
 #define LORA_DEFAULT_BW         250000   // Matches Ratdeck's default
 #define LORA_DEFAULT_SF         11
 #define LORA_DEFAULT_CR         5
-#define LORA_MAX_TX_POWER       22       // Cap LoRa-1262 documented maximum
-#define LORA_DEFAULT_TX_POWER   22
+// Chip max is 22dBm, but the Cap LoRa-1262's antenna switch is a single
+// path-enable pin (LORA_CAP_RF_SW_PIN), not per-direction TX/RX isolation —
+// running the PA at full power desensitizes the receiver on this board
+// (see issue #3). Cap below the chip max instead of at it.
+#define LORA_MAX_TX_POWER       20
+#define LORA_DEFAULT_TX_POWER   16
 #define LORA_DEFAULT_PREAMBLE   18
 
 // Cap LoRa-1262 RF antenna switch enable (PI4IOE5V6408 on Cardputer I2C).
