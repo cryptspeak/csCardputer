@@ -8,8 +8,8 @@
 // upstream ratspeak/rsCardputer version numbering (see docs/firmware-architecture.md).
 #define RSCARDPUTER_VERSION_MAJOR  0
 #define RSCARDPUTER_VERSION_MINOR  1
-#define RSCARDPUTER_VERSION_PATCH  3
-#define RSCARDPUTER_VERSION_STRING "0.1.3"
+#define RSCARDPUTER_VERSION_PATCH  4
+#define RSCARDPUTER_VERSION_STRING "0.1.4"
 
 // --- Feature Flags ---
 #define HAS_DISPLAY     true

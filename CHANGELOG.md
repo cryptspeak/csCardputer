@@ -5,6 +5,21 @@ Versioning is independent of upstream
 [ratspeak/rsCardputer](https://github.com/ratspeak/rsCardputer) — see
 `docs/firmware-architecture.md`.
 
+## v0.1.4 — LoRa RX Fix
+
+### Fixed
+
+- **Radio:** LoRa TX power defaulted to the SX1262's full rated 22 dBm,
+  which overdrove the Cap LoRa-1262's antenna path and desensed the
+  receiver — announces went out fine but incoming traffic never got
+  through. TX power is now capped to -3–20 dBm (default 16 dBm); existing
+  configs above the new cap are clamped automatically on next boot. (#3)
+- **UI:** the Radio Setup wizard and Settings > Radio > Config silently
+  discarded an out-of-range TX power entry and kept the old value with no
+  indication anything was wrong. Both now reject it with a visible error.
+
+Full diff: https://github.com/cryptspeak/csCardputer/compare/v0.1.3...v0.1.4
+
 ## v0.1.3 — Known-Destinations Encryption & Storage Metadata Hardening
 
 ### Added
